@@ -129,14 +129,14 @@ def call_settings ():
 def clean_up ():
     print ('TODO\n')
 
-while True:
+if __name__ == "__main__":
+    while True:
+        event, values = window.read()
+        if event == 'Settings':
+            call_settings ()
+            if event in (sg.WINDOW_CLOSED, 'Exit'):
+                break
+            print(event, values)
 
-    event, values = window.read()
-    if event == 'Settings':
-        call_settings ()
-    if event in (sg.WINDOW_CLOSED, 'Exit'):
-        break
-    print(event, values)
-
-clean_up ()
-window.close()
+    clean_up ()
+    window.close()
