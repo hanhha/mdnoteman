@@ -1,34 +1,37 @@
 #!/usr/bin/env python
 
+import sys
+if sys.hexversion < 0x03050000:
+    print("!!! This component requires Python version 3.5 at least !!!")
+    sys.exit(1)
+
+import configparser
+from pathlib import Path
+
 import FreeSimpleGUI as sg
+import mdnoteman_gui as gui
+from mdnoteman_pkm import Notebook as nb
 from tkhtmlview import html_parser
 
-def make_main_window (theme = "SystemDefaultForReal"):
-    menu_def = [['&Notebook', ['&Open', '---', 'E&xit']],
-                ['&Edit', ['Copy (&C)', 'Cut (&X)', 'Paste (&V)', '&Undo', '&Redo']],
-                ['T&ool', ['Settings']],
-                ['&Help', ['&About...']]]
+cfgpath_str = str(Path.home ()) + "/.mdnote"
+cfgfile_str = cfgpath_str + '/config'
+cfg = configparser.ConfigParser ()
+cfg_file = Path(cfgfile_str)
+if cfg_file.exists() and cfg_file.is_file():
+    cfg.read (cfgfile_str)
+else:
+    cfg['Appearance'] = {'Theme': 'SystemDefault1'}
+    cfg['Notebook'] = {'Path': ''}
 
-    layout_mid = []
-    layout_nested_labels = []
-    layout_tags = [[sg.Listbox (["all"], expand_x = True, expand_y = True)]]
+default_theme = cfg ['Appearance']['Theme']
 
-    middle_frame = sg.Frame ("Notes", key = '-MIDDLE_FRAME-', layout = layout_mid, expand_x = True, expand_y = True)
+def save_config ():
+    global cfgpath_str
+    global cfg
 
-    main_pane = sg.Pane([sg.Column([[sg.Frame ("Labels", layout_nested_labels, expand_x = True, expand_y = True)]]), sg.Column([[middle_frame]]), sg.Column([[sg.Frame ("Tags", layout_tags, expand_x = True, expand_y = True)]])],
-                        orientation = 'horizontal', expand_x = True, expand_y = True)
-
-    main_layout = [[sg.Menu (menu_def)],
-                   [sg.Button ('New Note'), sg.Input (key = '-SEARCH-', expand_x = True), sg.Button ('Graph View'), sg.Button ('Refresh')],
-                   [main_pane]]
-
-    font = ("default", 15, 'normal')
-    sg.theme(theme)
-    sg.set_options(font=font)
-
-    return sg.Window('MD Note Manager', main_layout, finalize=True, use_default_focus=True, grab_anywhere_using_control = True, resizable = True)
-
-window = make_main_window ()
+    Path(cfgpath_str).mkdir (parents = True, exist_ok = True)
+    with open (cfgpath_str + '/config', 'w') as cfgfile:
+        cfg.write (cfgfile)
 
 #def set_html(widget, html, strip=True):
 #    prev_state = widget.cget('state')
@@ -58,23 +61,6 @@ window = make_main_window ()
 #        key='Advertise')],
 #]
 #
-#keypad = [
-#    ["Rad/Deg",          "x!",   "(",  ")", "%", "AC"],
-#    ["Inv",       "sin", "ln",   "7", "8", "9", "÷" ],
-#    ["Pi",        "cos", "log",  "4",  "5", "6", "x" ],
-#    ["e",         "tan", "√",    "1",  "2", "3", "-" ],
-#    ["Ans",       "EXP", "POW",  "0",  ".", "=", "+" ],
-#]
-#
-#layout_calculator = [
-#    [sg.Button(
-#        key,
-#        size=(7, 4),
-#        expand_x=key=="Rad/Deg",
-#        button_color=('white', '#405373') if key in "1234567890" else sg.theme_button_color(),
-#     ) for key in line]
-#            for line in keypad]
-#
 #layout = [
 #    [sg.Frame("Calculator", layout_calculator, expand_x=True, expand_y=True),
 #     sg.Frame("Advertise",  layout_advertise, expand_x=True, expand_y=True)],
@@ -88,31 +74,45 @@ window = make_main_window ()
 #set_html(advertise, html)
 #width, height = advertise.winfo_width(), advertise.winfo_height()
 
-def call_settings ():
-    global window
+def new_notebook (path):
+    global Nb
 
-    def make_theme_window (theme):
-        sg.theme (theme)
+    Nb = nb (path = path)
+    Nb.Refresh ()
 
-        layout = [[sg.Text('Theme Browser')],
-                  [sg.Listbox(values=sg.theme_list(), size=(20, 12), key='-LIST-', enable_events = True, default_values = theme)],
-                  [sg.Button('OK'), sg.Button('Exit')]]
+def call_open ():
+    global cfg
 
-        return sg.Window('Theme Browser', layout, modal = True)
+    sel_notebook = sg.popup_get_folder (message = 'Select path to notebook',
+                                        default_path = cfg['Notebook']['Path'],
+                                        initial_folder = str(Path.home()), grab_anywhere = True, keep_on_top = True) \
+                   or cfg['Notebook']['Path']
+    if sel_notebook != cfg['Notebook']['Path']:
+        cfg['Notebook']['Path'] = sel_notebook
+    save_config ()
+    new_notebook (sel_notebook)
 
+def call_settings (window, cfg):
     old_theme = sg.theme ()
     new_theme = old_theme
     selected  = old_theme
 
-    setting_window = make_theme_window (selected)
+    setting_window = gui.make_theme_window (selected)
+    list_of_themes = setting_window['-LIST-'].get_list_values ()
+    selected_idx   = list_of_themes.index (selected)
+    setting_window['-LIST-'].update (scroll_to_index = selected_idx, set_to_index = selected_idx)
 
     while True:  # Event Loop
-        event, values = setting_window.read()
-        selected_theme = values['-LIST-'][0]
-        if selected_theme != selected:
-            setting_window.close ()
-            selected = selected_theme
-            setting_window = make_theme_window (selected)
+        event, values  = setting_window.read()
+        if event == '-LIST-':
+            selected_theme = values['-LIST-'][0]
+            selected_idx   = setting_window['-LIST-'].get_indexes ()[0]
+            if selected_theme != selected:
+                setting_window.close ()
+                selected = selected_theme
+                setting_window = make_theme_window (selected_theme)
+                setting_window['-LIST-'].update (scroll_to_index = selected_idx, set_to_index = selected_idx)
+            continue
 
         if event in (sg.WIN_CLOSED, 'Exit'):
             sg.theme (old_theme)
@@ -123,20 +123,21 @@ def call_settings ():
 
     setting_window.close ()
     if new_theme != old_theme:
-        window.close ()
-        window = make_main_window (new_theme)
+        gui.window.close ()
+        gui.window = create_gui (new_theme)
+        cfg['Appearance']['Theme'] = new_theme
+        save_config ()
 
 def clean_up ():
-    print ('TODO\n')
+    save_config ()
 
 if __name__ == "__main__":
+    gui.window = gui.create_gui (default_theme)
+
     while True:
-        event, values = window.read()
-        if event == 'Settings':
-            call_settings ()
-            if event in (sg.WINDOW_CLOSED, 'Exit'):
-                break
-            print(event, values)
+        gui_exit = gui.handle (setting_cb = call_settings, open_cb = call_open)
+        if gui_exit:
+            break
 
     clean_up ()
-    window.close()
+    gui.window.close()

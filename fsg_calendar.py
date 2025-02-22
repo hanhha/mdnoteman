@@ -2,7 +2,7 @@
 
 import sys
 if sys.hexversion < 0x03070000:
-    print("!!! This script requires Python version 3.7 at least !!!")
+    print("!!! This component requires Python version 3.7 at least !!!")
     sys.exit(1)
 
 import FreeSimpleGUI as sg
@@ -35,10 +35,9 @@ class Calendar:
     start_year : int = None
     begin_at_sunday_plus : int = 0
     locale : str = None
+    key_prefix : str = "cal"
     month_names : List[str] = field (default_factory=lambda: [calendar.month_name[i] for i in range(1,13)])
-
     day_abbreviations : List[str] = None
-
     day_font      : str = 'TkFixedFont 11'
     mon_year_font : str = 'TkFixedFont 12'
     arrow_font    : str = 'TkFixedFont 9'
@@ -57,7 +56,7 @@ class Calendar:
         for week in range(6):
             row = []
             for day in range(7):
-                row.append(sg.T('', size=(4, 1), justification='c', font=self.day_font, key=(week, day), enable_events=True, pad=(0, 0)))
+                row.append(sg.T('', size=(4, 1), justification='c', font=self.day_font, key=(self.key_prefix, week, day), enable_events=True, pad=(0, 0)))
             days_layout.append(row)
         return days_layout
 
@@ -81,18 +80,19 @@ class Calendar:
 
         days_layout = self.make_days_layout()
 
-        layout = [[sg.B('◄◄', font=self.arrow_font, border_width=0, key='-YEAR-DOWN-', pad=((10,2),2)),
-                   sg.B('◄', font=self.arrow_font, border_width=0, key='-MON-DOWN-', pad=(0,2)),
-                   sg.Text('{} {}'.format(self.month_names[cur_month - 1], cur_year), size=(16, 1), justification='c', font=self.mon_year_font, key='-MON-YEAR-', pad=(0,2)),
-                   sg.B('►', font=self.arrow_font,border_width=0, key='-MON-UP-', pad=(0,2)),
-                   sg.B('►►', font=self.arrow_font,border_width=0, key='-YEAR-UP-', pad=(2,2))]]
+        layout = [[sg.B('◀◀', font=self.arrow_font, border_width=0, key=f"{self.key_prefix}-YEAR-DOWN-", pad=(2,2)),
+                   sg.B('◀', font=self.arrow_font, border_width=0, key=f"{self.key_prefix}-MON-DOWN-", pad=(0,2)),
+                   sg.Text('{} {}'.format(self.month_names[cur_month - 1], cur_year), size=(16, 1), justification='c', font=self.mon_year_font, key=f'{self.key_prefix}-MON-YEAR-', pad=(0,2)),
+                   sg.B('▶', font=self.arrow_font,border_width=0, key=f"{self.key_prefix}-MON-UP-", pad=(0,2)),
+                   sg.B('▶▶', font=self.arrow_font,border_width=0, key=f"{self.key_prefix}-YEAR-UP-", pad=(2,2))]]
         layout += [[sg.Col([[sg.T(day_names[i - (7 - self.begin_at_sunday_plus) % 7], size=(4,1), font=self.day_font, background_color=sg.theme_text_color(), text_color=sg.theme_background_color(), pad=(0,0)) for i in range(7)]], background_color=sg.theme_text_color(), pad=(0,0))]]
         layout += days_layout
+        layout += [[sg.Push(), sg.B(f'Today: {cur_month}/{cur_day}/{cur_year}', font=self.mon_year_font, key=f'{self.key_prefix}-TODAY-', pad=(0,2)), sg.Push()]]
 
         return layout
 
     def update_days(self, month, year):
-        [self.window[(week, day)].update('') for day in range(7) for week in range(6)]
+        [self.window[(self.key_prefix, week, day)].update('') for day in range(7) for week in range(6)]
         weeks = calendar.monthcalendar(year, month)
         month_days = list(itertools.chain.from_iterable([[0 for _ in range(8 - self.begin_at_sunday_plus)]] + weeks))
         if month_days[6] == 0:
@@ -103,46 +103,43 @@ class Calendar:
             offset = i
             if offset >= 6 * 7:
                 break
-            self.window[(offset // 7, offset % 7)].update(str(day) if day else '')
+            self.window[(self.key_prefix, offset // 7, offset % 7)].update(str(day) if day else '')
 
     def set_date (self, set_mon = None, set_day = None, set_year = None, within_month_week_day =  None):
         if within_month_week_day:
             if self.prev_choice:
-                self.window[self.prev_choice].update(background_color=sg.theme_background_color(), text_color=sg.theme_text_color())
-            self.window[within_month_week_day].update(background_color=sg.theme_text_color(), text_color=sg.theme_background_color())
+                self.window[(self.key_prefix,) + self.prev_choice].update(background_color=sg.theme_background_color(), text_color=sg.theme_text_color())
+            self.window[(self.key_prefix,) + within_month_week_day].update(background_color=sg.theme_text_color(), text_color=sg.theme_background_color())
             self.prev_choice = within_month_week_day
 
             if set_day:
                 self.chosen_date = self.looking_month_year [0], set_day, self.looking_month_year [1]
         else:
+            if set_mon and set_day and set_year:
+                self.chosen_date = set_mon, set_day, set_year
+
             if self.chosen_date:
                 sel_month, sel_day, sel_year = self.chosen_date
             else:
                 sel_month, sel_day, sel_year = self.current_date
 
-            cur_month, cur_day, cur_year = self.current_date
-
             if self.looking_month_year:
-                draw_month, draw_year = self.looking_month_year
+                draw_month = set_mon or self.looking_month_year [0]
+                draw_year  = set_year or self.looking_month_year [1]
             else:
-                draw_month, draw_year = sel_month, sel_year
-
-            draw_month = set_mon or draw_month
-            draw_year  = set_year or draw_year
+                draw_month = set_mon or sel_month
+                draw_year  = set_year or sel_year
             self.looking_month_year = draw_month, draw_year
 
-            if set_mon and set_day and set_year:
-                self.chosen_date = set_mon, set_day, set_year
-
-            self.window['-MON-YEAR-'].update('{} {}'.format(self.month_names[draw_month - 1], draw_year))
+            self.window[f'{self.key_prefix}-MON-YEAR-'].update('{} {}'.format(self.month_names[draw_month - 1], draw_year))
             self.update_days(draw_month, draw_year)
             if self.prev_choice:
-                self.window[self.prev_choice].update(background_color=sg.theme_background_color(), text_color=sg.theme_text_color())
+                self.window[(self.key_prefix,) + self.prev_choice].update(background_color=sg.theme_background_color(), text_color=sg.theme_text_color())
             for week in range(6):
                 for day in range(7):
-                    if (sel_month == draw_month) and (sel_year == draw_year) and self.window[(week,day)].DisplayText == str(sel_day):
-                            self.window[(week,day)].update(background_color=sg.theme_text_color(), text_color=sg.theme_background_color())
-                            self.prev_choice = (week,day)
+                    if (sel_month == draw_month) and (sel_year == draw_year) and self.window[(self.key_prefix, week,day)].DisplayText == str(sel_day):
+                        self.window[(self.key_prefix, week,day)].update(background_color=sg.theme_text_color(), text_color=sg.theme_background_color())
+                        self.prev_choice = (week,day)
 
 
     def init_cal (self, window):
@@ -151,13 +148,17 @@ class Calendar:
 
     def handle (self, event, values):
         ''' Call in Event Loop '''
-        cur_month, cur_year = self.looking_month_year
+        if event in (f'{self.key_prefix}-MON-UP-', f'{self.key_prefix}-MON-DOWN-', f'{self.key_prefix}-YEAR-UP-', f'{self.key_prefix}-YEAR-DOWN-', f'{self.key_prefix}-TODAY-'):
+            if event == f'{self.key_prefix}-TODAY-':
+                cur_month, cur_day, cur_year = self.current_date
+            else:
+                cur_month, cur_year = self.looking_month_year
+                cur_day = None
 
-        if event in ('-MON-UP-', '-MON-DOWN-', '-YEAR-UP-','-YEAR-DOWN-'):
-            cur_month += (event == '-MON-UP-')
-            cur_month -= (event == '-MON-DOWN-')
-            cur_year  += (event == '-YEAR-UP-')
-            cur_year  -= (event == '-YEAR-DOWN-')
+            cur_month += (event == f'{self.key_prefix}-MON-UP-')
+            cur_month -= (event == f'{self.key_prefix}-MON-DOWN-')
+            cur_year  += (event == f'{self.key_prefix}-YEAR-UP-')
+            cur_year  -= (event == f'{self.key_prefix}-YEAR-DOWN-')
             if cur_month > 12:
                 cur_month = 1
                 cur_year += 1
@@ -165,10 +166,11 @@ class Calendar:
                 cur_month = 12
                 cur_year -= 1
 
-            self.set_date (set_mon = cur_month, set_year = cur_year)
+            self.set_date (set_mon = cur_month, set_year = cur_year, set_day = cur_day)
         elif type(event) is tuple:
-            if self.window[event].DisplayText != "":
-                self.set_date (set_day = int(self.window[event].DisplayText), within_month_week_day = event)
+            if event [0] == self.key_prefix:
+                if self.window[event].DisplayText != "":
+                    self.set_date (set_day = int(self.window[event].DisplayText), within_month_week_day = (event[1], event[2]))
 
 if __name__ == '__main__':
     # Create the Calendar object and its layout
