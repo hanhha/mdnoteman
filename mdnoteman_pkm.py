@@ -10,16 +10,28 @@ from typing import List, Dict
 
 @dataclass
 class Note:
-    tags      : List[str] = field (default_factory = lambda: [])
-    labels    : List[str] = field (default_factory = lambda: [])
-    title     : str = ''
-    content   : str = ''
+    tags      : List[str] = field (default_factory = lambda: ['aaa', 'bbb', 'ccc'])
+    labels    : List[str] = field (default_factory = lambda: ['AAA', 'AAA/A1A1A1'])
+    title     : str = 'Test note'
+    content   : str = 'Test note test note'
     timestamp : int = 0
+
+    @property
+    def simple_content (self):
+        _content = f"**{self.title}**  \n"
+        _content += f"{self.content}  \n"
+        _content += "  \n"
+        _content += f"{' '.join(['\# ' + tag for tag in self.tags])}  \n"
+        _content += f"{' '.join(['\@ ' + lbl for lbl in self.labels])}  \n"
+        return _content
 
 @dataclass
 class Notebook:
     tags   : Dict = None
-    labels : Dict = None
+    labels : List[Dict] = field (default_factory = lambda: [{'txt': 'A', 'count' : 10, 'children': None},
+                                                            {'txt': 'B', 'count' : 5, 'children': [{'txt': 'B1', 'count': 2, 'children': None},
+                                                                                                   {'txt': 'B2', 'count': 3, 'children': None}]},
+                                                            {'txt': 'C', 'count' : 3, 'children': None}])
     path   : str  = None
     notes  : List[Note] = field (default_factory = lambda: [])
 

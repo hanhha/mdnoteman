@@ -10,8 +10,7 @@ from pathlib import Path
 
 import FreeSimpleGUI as sg
 import mdnoteman_gui as gui
-from mdnoteman_pkm import Notebook as nb
-from tkhtmlview import html_parser
+from mdnoteman_pkm import Notebook
 
 cfgpath_str = str(Path.home ()) + "/.mdnote"
 cfgfile_str = cfgpath_str + '/config'
@@ -25,6 +24,8 @@ else:
 
 default_theme = cfg ['Appearance']['Theme']
 
+Nb = Notebook ()
+
 def save_config ():
     global cfgpath_str
     global cfg
@@ -33,13 +34,6 @@ def save_config ():
     with open (cfgpath_str + '/config', 'w') as cfgfile:
         cfg.write (cfgfile)
 
-#def set_html(widget, html, strip=True):
-#    prev_state = widget.cget('state')
-#    widget.config(state=sg.tk.NORMAL)
-#    widget.delete('1.0', sg.tk.END)
-#    widget.tag_delete(widget.tag_names)
-#    html_parser.w_set_html(widget, html, strip=strip)
-#    widget.config(state=prev_state)
 #
 #html = """
 #<td colspan="2" class="infobox-image"><a href="https://en.wikipedia.org/wiki/RoboCop" class="image">
@@ -77,7 +71,7 @@ def save_config ():
 def new_notebook (path):
     global Nb
 
-    Nb = nb (path = path)
+    Nb = Notebook (path = path)
     Nb.Refresh ()
 
 def call_open ():
@@ -91,6 +85,11 @@ def call_open ():
         cfg['Notebook']['Path'] = sel_notebook
     save_config ()
     new_notebook (sel_notebook)
+
+def create_gui (theme):
+    global Nb
+
+    return gui.create_gui (theme, label_tree = Nb.labels)
 
 def call_settings (window, cfg):
     old_theme = sg.theme ()
@@ -132,12 +131,10 @@ def clean_up ():
     save_config ()
 
 if __name__ == "__main__":
-    gui.window = gui.create_gui (default_theme)
+    gui.window = create_gui (default_theme)
 
-    while True:
-        gui_exit = gui.handle (setting_cb = call_settings, open_cb = call_open)
-        if gui_exit:
-            break
+    while gui.handle (setting_cb = call_settings, open_cb = call_open):
+        pass
 
     clean_up ()
     gui.window.close()
