@@ -10,32 +10,37 @@ from fsg_calendar import Calendar
 from tkhtmlview import html_parser
 import markdown as md
 from mdnoteman_pkm import Note, Notebook
+from dataclasses import dataclass, field
+from typing import List, Dict
+import random
 
 default_theme = 'SystemDefault1'
-window = None
-html_parser = html_parser.HTMLTextParser()
-cal    = Calendar (key_prefix = "Cal")
+window        = None
+html_parser   = html_parser.HTMLTextParser()
+cal           = Calendar (key_prefix = "Cal")
 
 @dataclass
 class NoteCard:
     note: Note = None
     name: str = None
 
-    def set_html (self, html, strip=True):
+    def set_html (self, html, strip = True):
         prev_state = self.widget.cget('state')
-        self.widget.config(state=sg.tk.NORMAL)
-        self.widget.delete('1.0', sg.tk.END)
-        self.widget.tag_delete(self.widget.tag_names)
-        html_parser.w_set_html(self.widget, html, strip=strip)
-        self.widget.config(state=prev_state)
+        self.widget.config (state=sg.tk.NORMAL)
+        self.widget.delete ('1.0', sg.tk.END)
+        self.widget.tag_delete (self.widget.tag_names)
+        html_parser.w_set_html (self.widget, html, strip = strip)
+        self.widget.config (state=prev_state)
 
     @property
     def layout (self):
-        _layout = [[sg.Multiline(key = ("card", "content", self.name))]]
+        _layout = sg.Multiline(key = ("card", "content", self.name), pad = 2, size = (23, None), background_color = self.note.color, no_scrollbar = True, disabled = True)
         return _layout
 
     def set_content (self):
-        self.set_html (md.markdown (self.widget, md.markdown (self.note.simple_content)))
+        self.set_html (md.markdown (self.note.simple_content))
+        #self.window [('card', 'content', self.name)].set_size ((23, min(23, len (self.note.simple_content.splitlines()))))
+        self.window [('card', 'content', self.name)].set_size ((23, random.randrange (10, 23, 3)))
 
     def init (self, window):
         self.window = window
@@ -44,6 +49,38 @@ class NoteCard:
 
     def update (self, txt):
         pass
+
+@dataclass
+class Cardshow:
+    cards : List[NoteCard] = None
+    n_cols: int = 3
+
+    @property
+    def layout (self):
+        _layout = []
+        for c in range (self.n_cols):
+            __layout = []
+            for n in range (c, len (self.cards), self.n_cols):
+                __layout += [[self.cards[n].layout]]
+            #__layout += [[sg.VPush()]]
+            _layout += [sg.Column (layout = __layout, pad = 0, vertical_alignment = 'top')]
+
+        return [_layout]
+
+    def init (self, window):
+        for card in self.cards:
+            card.init (window)
+
+    def set_cards (self, cards = None):
+        if not cards:
+            self.cards = []
+            for i in range (10):
+                self.cards += [NoteCard(note = Note(), name = f'{i}')]
+                s = random.randrange (2, 12, 2)
+                self.cards [-1].note.content = "Test note " * s
+        else:
+            self.cards = cards
+
 
 def make_label_tree (label_tree = None):
     sg_lbl_tree = sg.TreeData ()
@@ -62,6 +99,9 @@ def make_label_tree (label_tree = None):
 
     return sg_lbl_tree
 
+cardshow = Cardshow ()
+cardshow.set_cards ()
+
 def make_main_window (cal, label_tree = None, tags = None, notes = None):
     menu_def = [['&Notebook', ['&Open', '---', 'E&xit']],
                 ['&Edit', ['Copy (&C)', 'Cut (&X)', 'Paste (&V)', '&Undo', '&Redo']],
@@ -69,8 +109,7 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
                 ['&Help', ['&About...']]]
 
     mene_elem  = sg.Menu (menu_def)
-    layout_mid = [[sg.Push()]]
-
+    layout_mid = [[sg.Column (layout = cardshow.layout, pad = 0, scrollable = True)]]
 
     layout_nested_labels = [[sg.Tree(data = make_label_tree (label_tree),
                                      auto_size_columns = True,
@@ -116,6 +155,7 @@ def create_gui (theme = default_theme, label_tree = None):
     #window['-TAGS-'].bind ("<ButtonRelease-1>", ' Release')
     #window['-TAGS-'].bind ("<B1-Motion>", ' Drag')
     cal.init_cal (window)
+    cardshow.init (window)
 
     return window
 

@@ -13,8 +13,9 @@ class Note:
     tags      : List[str] = field (default_factory = lambda: ['aaa', 'bbb', 'ccc'])
     labels    : List[str] = field (default_factory = lambda: ['AAA', 'AAA/A1A1A1'])
     title     : str = 'Test note'
-    content   : str = 'Test note test note'
+    content   : str = 'Test note'
     timestamp : int = 0
+    color     : str = 'WHITE'
 
     @property
     def simple_content (self):
