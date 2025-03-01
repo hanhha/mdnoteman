@@ -34,40 +34,6 @@ def save_config ():
     with open (cfgpath_str + '/config', 'w') as cfgfile:
         cfg.write (cfgfile)
 
-#
-#html = """
-#<td colspan="2" class="infobox-image"><a href="https://en.wikipedia.org/wiki/RoboCop" class="image">
-#<img alt="RoboCop (1987) theatrical poster.jpg" src="https://upload.wikimedia.org/wikipedia/en/thumb/1/16/RoboCop_%281987%29_theatrical_poster.jpg/220px-RoboCop_%281987%29_theatrical_poster.jpg" decoding="async" width="250" height="386" class="thumbborder" srcset="//upload.wikimedia.org/wikipedia/en/1/16/RoboCop_%281987%29_theatrical_poster.jpg 1.5x" data-file-width="248" data-file-height="374"></a>
-#<div class="infobox-caption" style="text-align:center">Directed by Paul Verhoeven<br>Release date July 17, 1987</div></td>
-#"""
-#
-#
-#layout_advertise = [
-#    [sg.Multiline(
-#        size=(25, 10),
-#        border_width=2,
-#        text_color='white',
-#        background_color='green',
-#        disabled=True,
-#        no_scrollbar=True,
-#        expand_x=True,
-#        expand_y=True,
-#        key='Advertise')],
-#]
-#
-#layout = [
-#    [sg.Frame("Calculator", layout_calculator, expand_x=True, expand_y=True),
-#     sg.Frame("Advertise",  layout_advertise, expand_x=True, expand_y=True)],
-#]
-#for element in window.key_dict.values():
-#    element.block_focus()
-#
-#advertise = window['Advertise'].Widget
-#
-#html_parser = html_parser.HTMLTextParser()
-#set_html(advertise, html)
-#width, height = advertise.winfo_width(), advertise.winfo_height()
-
 def new_notebook (path):
     global Nb
 
@@ -132,6 +98,10 @@ def clean_up ():
 
 if __name__ == "__main__":
     gui.window = create_gui (default_theme)
+
+    Nb.Create_random_notes ()
+    gui.cardbox.add_cards (Nb.notes)
+
 
     while gui.handle (setting_cb = call_settings, open_cb = call_open):
         pass

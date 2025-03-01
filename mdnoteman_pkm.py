@@ -7,6 +7,7 @@ if sys.hexversion < 0x03070000:
 
 from dataclasses import dataclass, field
 from typing import List, Dict
+import random
 
 @dataclass
 class Note:
@@ -14,7 +15,7 @@ class Note:
     labels    : List[str] = field (default_factory = lambda: ['AAA', 'AAA/A1A1A1'])
     title     : str = 'Test note'
     content   : str = 'Test note'
-    timestamp : int = 0
+    name      : str = None
     color     : str = 'WHITE'
 
     @property
@@ -38,3 +39,7 @@ class Notebook:
 
     def Refresh (self):
         print (self.path)
+
+    def Create_random_notes (self, name_prf = '', num = 10):
+        for i in range (num):
+            self.notes += [Note(name = name_prf + str(i), content = "Test note " * random.randrange (2, 240, 2))]
