@@ -57,54 +57,26 @@ def create_gui (theme):
 
     return gui.create_gui (theme, label_tree = Nb.labels)
 
-def call_settings (window, cfg):
-    old_theme = sg.theme ()
-    new_theme = old_theme
-    selected  = old_theme
+def call_settings ():
+    global cfg
 
-    setting_window = gui.make_theme_window (selected)
-    list_of_themes = setting_window['-LIST-'].get_list_values ()
-    selected_idx   = list_of_themes.index (selected)
-    setting_window['-LIST-'].update (scroll_to_index = selected_idx, set_to_index = selected_idx)
-
-    while True:  # Event Loop
-        event, values  = setting_window.read()
-        if event == '-LIST-':
-            selected_theme = values['-LIST-'][0]
-            selected_idx   = setting_window['-LIST-'].get_indexes ()[0]
-            if selected_theme != selected:
-                setting_window.close ()
-                selected = selected_theme
-                setting_window = make_theme_window (selected_theme)
-                setting_window['-LIST-'].update (scroll_to_index = selected_idx, set_to_index = selected_idx)
-            continue
-
-        if event in (sg.WIN_CLOSED, 'Exit'):
-            sg.theme (old_theme)
-            break
-        if event == 'OK':
-            new_theme = selected_theme
-            break
-
-    setting_window.close ()
-    if new_theme != old_theme:
-        gui.window.close ()
-        gui.window = create_gui (new_theme)
-        cfg['Appearance']['Theme'] = new_theme
-        save_config ()
+    cfg = gui.theme_change (cfg)
+    save_config ()
 
 def clean_up ():
     save_config ()
 
 if __name__ == "__main__":
-    gui.window = create_gui (default_theme)
-
     Nb.Create_random_notes ()
+
+    gui.window = create_gui (default_theme)
     gui.cardbox.add_cards (Nb.notes)
+    gui.window.timer_start (200)
 
 
-    while gui.handle (setting_cb = call_settings, open_cb = call_open):
+    while gui.handle (setting_cb = lambda : call_settings (), open_cb = call_open):
         pass
 
     clean_up ()
+    gui.window.timer_stop_all ()
     gui.window.close()
