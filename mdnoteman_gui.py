@@ -108,7 +108,7 @@ class CardBox:
         old_n_cols = self.n_cols
         self.n_cols = self.width // 256
 
-        if self.n_cols > old_n_col:
+        if self.n_cols > old_n_cols:
             for i in range (old_n_cols, self.n_cols):
                 self.window.extend_layout (self.window [self.name], [[sg.Column (key = (self.name + 'col', i),
                                                                                  layout = [], pad = 0, vertical_alignment = 'top')]])
@@ -203,7 +203,7 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
     main_layout += [[sg.Button ('New Note'), sg.Input (key = '-SEARCH-', expand_x = True), sg.Button ('Graph View'), sg.Button ('Refresh')]]
     main_layout += [[main_pane]]
 
-    win = ext_sg.Window('MD Note Manager', main_layout, finalize = True, use_default_focus = True, grab_anywhere_using_control = True, resizable = True)
+    win = ext_sg.Window('MD Note Manager', main_layout, finalize = True, use_default_focus = True, grab_anywhere_using_control = True, resizable = True, use_ttk_buttons = True, ttk_theme = sg.DEFAULT_TTK_THEME)
     rwidth = win['-RIGHT_PANE-'].get_size()[0]
     lwidth = win['-LEFT_PANE-'].get_size()[0]
     win['-PANE-'].widget.paneconfig (win['-MIDDLE_PANE-'].widget, minsize = 272)
