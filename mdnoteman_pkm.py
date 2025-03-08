@@ -20,13 +20,14 @@ class Note:
 
     @property
     def simple_context (self):
-        _content = f"{' '.join(['#' + tag for tag in self.tags])}\n"
-        _content += f"{'\n'.join(['@' + lbl for lbl in self.labels])}"
+        _content = "---\n\n"
+        _content += f"{' '.join(['\#' + tag for tag in self.tags])}\n\n"
+        _content += f"{'\n\n'.join(['@' + lbl for lbl in self.labels])}"
         return _content
     @property
 
     def simple_content (self):
-        _content = f"**{self.title}**\n\n"
+        _content = f"# {self.title}\n\n"
         _content += f"{self.content}\n\n"
         return _content
 
@@ -45,4 +46,4 @@ class Notebook:
 
     def Create_random_notes (self, name_prf = '', num = 10):
         for i in range (num):
-            self.notes += [Note(name = name_prf + str(i), content = "Test note " * random.randrange (2, 240, 2))]
+            self.notes += [Note(name = name_prf + str(i), title = f"Test note {i}", content = "Test note " * random.randrange (2, 240, 2))]

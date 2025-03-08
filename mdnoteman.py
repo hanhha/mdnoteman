@@ -67,12 +67,12 @@ def clean_up ():
     save_config ()
 
 if __name__ == "__main__":
-    Nb.Create_random_notes ()
+    Nb.Create_random_notes (num = 10)
 
     gui.window = create_gui (default_theme)
+
     gui.cardbox.add_cards (Nb.notes)
     gui.window.timer_start (200)
-
 
     while gui.handle (setting_cb = lambda : call_settings (), open_cb = call_open):
         pass

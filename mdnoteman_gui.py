@@ -9,11 +9,13 @@ import FreeSimpleGUI as sg
 from fsg_calendar import Calendar
 from tkhtmlview import html_parser
 import tkinter as tk
-import markdown as md
+from md2img import Markdown_Ext
 from mdnoteman_pkm import Note, Notebook
-import mdnoteman_extended_sg as ext_sg
 from dataclasses import dataclass, field
 from typing import List, Dict
+from PIL import Image, ImageDraw, ImageFont
+import io
+import base64
 
 default_theme = 'SystemDefault1'
 window        = None
@@ -23,128 +25,151 @@ cal           = Calendar (key_prefix = "Cal")
 class NoteCard:
     note: Note = None
     name: str = None
-    window: ext_sg.Window = None
-    parser: html_parser.HTMLTextParser = html_parser.HTMLTextParser ()
-
-    def fit_height (self):
-        widget = self.window[("card", self.name, 'ctn')].widget
-        widget.update ()
-        need_lines = widget.count ("1.0", "end", "displaylines") [0] - 2
-        self.window[("card", self.name, 'ctn')].set_size ((None, 20 if need_lines > 20 else need_lines))
-
-    def set_html (self, html, strip = True):
-        widget = self.window[("card", self.name, 'ctn')].widget
-        prev_state = widget.cget('state')
-        widget.config (state=sg.tk.NORMAL)
-        widget.delete ('1.0', sg.tk.END)
-        widget.tag_delete (widget.tag_names)
-        self.parser.w_set_html (widget, html, strip = strip)
-        widget.config (state=prev_state)
+    width: int = 240
+    _thumbnail: Image = None
+    _thumbnail_bio: io.BytesIO = None
+    md : Markdown_Ext = None
 
     @property
-    def layout (self):
-        _e = sg.Column ([[sg.Multiline(key = ("card", self.name, 'ctn'), pad = ((8,8), (8,1)), border_width = 1,
-                                       size = (23, 3), background_color = self.note.color,
-                                       no_scrollbar = True, disabled = True, write_only = True,
-                                       expand_x = True, expand_y = True)],
-                         [sg.Text(key = ('card', self.name, 'ctx'), pad = ((8,8),(1,8)), border_width = 1,
-                                  size = (23,3), background_color = self.note.color,
-                                  expand_x = True, expand_y = True)]], key = ("card", self.name))
-        return _e
+    def thumbnail (self):
+        return self._thumbnail
 
-    def set_content (self):
-        self.set_html (md.markdown (self.note.simple_content))
-        self.fit_height ()
-        self.window[("card", self.name, 'ctx')].print (self.note.simple_context)
+    @property
+    def thumbnail_bio (self):
+        return self._thumbnail_bio
 
+    def set_fig (self, fig):
+        self.fig = fig
+
+    def init (self):
+        self.md = Markdown_Ext ([(0, 0, self.width)], {'color': (0,0,0,255), 'margin_bottom': 8})
+        self.update ()
+
+    def update (self):
+        ctn = self.md.convert_img (self.note.simple_content)
+        ctx = self.md.convert_img (self.note.simple_context)
+        ctn_h = 240 if (ctn.size[1] > 240) else ctn.size[1]
+        img = Image.new ("RGBA", (self.width, ctn_h + ctx.size [1]))
+        img.paste (ctn, (0, 0))
+        img.paste (ctx, (0, ctn_h))
+        bio = io.BytesIO ()
+        img.save (bio, format = "PNG")
+        self._thumbnail = img.copy ()
+        self._thumbnail_bio = bio.getvalue ()
+        del img
+
+@dataclass
+class CardBox:
+    cards : List[NoteCard] = field (default_factory = lambda: [])
+    n_cols: int = 3
+    window: sg.Window = None
+    name  : str = ''
+    width : int = 768
+    tags_oi: List[str] = field (default_factory = lambda: [])
+    labels_oi: List[str] = field (default_factory = lambda: [])
+    tags_oni: List[str] = field (default_factory = lambda: [])
+    labels_oni: List[str] = field (default_factory = lambda: [])
 
     def scroll_handle (self, event):
         if self.container_scroll_cb:
             self.container_scroll_cb (event)
         return 'break'
 
-    def init (self, window, container_scroll_cb = None):
-        self.window = window
-        self.window [('card', self.name)].set_cursor (cursor = 'left_ptr')
-        self.container_scroll_cb = container_scroll_cb
-        self.window[("card", self.name, 'ctn')].widget.configure (relief = 'groove')
-        self.window[("card", self.name, 'ctn')].widget.bind ('<MouseWheel>', self.scroll_handle)
-        self.window[("card", self.name, 'ctx')].widget.configure (relief = 'groove')
-        self.window[("card", self.name, 'ctx')].widget.bind ('<MouseWheel>', self.scroll_handle)
-
-        self.set_content ()
-
-    def update (self, txt):
-        pass
-
-@dataclass
-class CardBox:
-    cards : List[NoteCard] = field (default_factory = lambda: [])
-    n_cols: int = 3
-    window: ext_sg.Window = None
-    name  : str = ''
-    width : int = 768
-
     @property
     def layout (self):
-        _layout = []
+        _layout = [(sg.Graph (key = (self.name, "graph"),
+                              canvas_size = (self.width, 1), graph_bottom_left = (0, 1), graph_top_right = (self.width, 0),
+                              expand_x = True, expand_y = True, enable_events = True, drag_submits = True))]
         return [_layout]
+
+    @property
+    def cards_oi (self):
+        """ return cards of interest """
+        return self._cards_oi
+
+    def filter_cards (self, tags = None, labels = None, excl_tags = None, excl_labels = None):
+        self.tags_oi    = tags or self.tags_oi
+        self.labels_oi  = labels or self.labels_oi
+        self.tags_oni   = excl_tags or self.tags_oni
+        self.labels_oni = excl_labels or self.labels_oni
+
+        self._cards_oi = []
+        for card in self.cards:
+            selected = False
+            l = len(self.labels_oi)
+            for lbl in card.note.labels:
+                if ((l == 0) or (lbl in self.labels_oi)) and (lbl not in self.labels_oni):
+                    selected = True
+                    break
+            if selected:
+                selected = False
+                l = len(self.tags_oi)
+                for tag in card.note.tags:
+                    if ((l == 0) or (tag in self.tags_oi)) and (tag not in self.tags_oni):
+                        selected = True
+                        break
+
+            if selected:
+                self._cards_oi.append (card)
+
 
     def add_cards (self, notes):
         for note in notes:
-            self.cards.insert (0, NoteCard(note = note, name = note.name) )
+            card = NoteCard(note = note, name = note.name)
+            card.init ()
+            self.cards.insert (0, card)
+
+        self.filter_cards ()
 
         if self.window:
             self.refresh_box ()
 
-    def arrange_cards (self, old_n_cols):
-        self.cards[0].widget.destroy ()
-        self.cards[0].widget.master.destroy ()
-        self.cards[0].widget.master.master.destroy ()
-        self.window [(self.name + 'col', 0)].widget.update ()
+    def erase (self):
+        self.window[(self.name, "graph")].set_size ((self.width, 1))
+        self.window[(self.name, "graph")].change_coordinates ((0, 1), (self.width, 0))
+        self.window[(self.name, "graph")].erase()
 
     def resize (self, width):
         self.width = width
         old_n_cols = self.n_cols
         self.n_cols = self.width // 256
 
-        if self.n_cols > old_n_cols:
-            for i in range (old_n_cols, self.n_cols):
-                self.window.extend_layout (self.window [self.name], [[sg.Column (key = (self.name + 'col', i),
-                                                                                 layout = [], pad = 0, vertical_alignment = 'top')]])
-        elif self.n_cols < old_n_cols:
-            for i in range (self.n_cols, old_n_cols):
-                self.window[(self.name + 'col', i)].widget.destroy ()
-
         if self.n_cols != old_n_cols:
-            self.arrange_cards (old_n_cols)
-            self.window [self.name].widget.update ()
-            self.window [self.name].contents_changed ()
-            self.window [self.name].expand (expand_row = True)
+            self.erase ()
+            self.refresh_box ()
 
     def refresh_box (self):
         self.n_cols = self.width // 256
-        _layout = list ()
-        N = len (self.cards)
+        N = len (self.cards_oi)
 
-        for c in range (self.n_cols):
-            __layout = list ()
-            for n in range (c, N, self.n_cols):
-                __layout.append ([self.cards[n].layout])
-            _layout.append (sg.Column (key = (self.name + 'col', c),
-                                       layout = __layout, pad = 0, vertical_alignment = 'top'))
-
-        self.window.new_layout (self.window [self.name], [_layout])
-
+        c = 0
         for n in range (N):
-            self.cards [n].init (self.window, self.window[self.name].TKColFrame.yscroll)
+            i = 1
+            y = 0
+            upper_n = n - i*self.n_cols
+            while (upper_n >= 0):
+                y += (self.cards_oi[upper_n].thumbnail.size[1] + 16)
+                i += 1
+                upper_n = n - i*self.n_cols
+
+            w,h = self.cards_oi[n].thumbnail.size
+            if y + 16 + h > self.window[(self.name, "graph")].CanvasSize [1]:
+                self.window[(self.name, "graph")].set_size ((self.width, y + 16 + h))
+                self.window[(self.name, "graph")].change_coordinates ((0, y + 16 + h), (self.width, 0))
+
+            bg  = self.window[(self.name, "graph")].draw_rectangle (top_left = (c * 256 + 6, y + 6), bottom_right = (c * 256 + 8 + w + 2, y + 8 + h + 2), line_color = 'black', line_width = 1, fill_color = 'white')
+            fig = self.window[(self.name, "graph")].draw_image (data = self.cards_oi[n].thumbnail_bio, location = (c * 256 + 8, y + 8))
+            self.cards_oi[n].set_fig ((bg, fig))
+            c = 0 if (c + 1 == self.n_cols) else c + 1
 
         self.window [self.name].widget.update ()
         self.window [self.name].contents_changed ()
         self.window [self.name].expand (expand_row = True)
 
-    def init (self, window):
+    def init (self, window, container_scroll_cb = None):
         self.window = window
+        self.container_scroll_cb = container_scroll_cb
+        self.window[(self.name, 'graph')].widget.bind ('<MouseWheel>', self.scroll_handle)
 
 def make_label_tree (label_tree = None):
     sg_lbl_tree = sg.TreeData ()
@@ -174,6 +199,7 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
     mene_elem  = sg.Menu (menu_def)
     layout_mid = [[sg.Column (key = cardbox.name, layout = cardbox.layout, pad = 0,
                               scrollable = True, vertical_scroll_only = True,
+                              vertical_alignment = 'top',
                               expand_x = True, expand_y = True, size = (cardbox.width, None))]]
 
     layout_nested_labels = [[sg.Tree(data = make_label_tree (label_tree),
@@ -203,7 +229,9 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
     main_layout += [[sg.Button ('New Note'), sg.Input (key = '-SEARCH-', expand_x = True), sg.Button ('Graph View'), sg.Button ('Refresh')]]
     main_layout += [[main_pane]]
 
-    win = ext_sg.Window('MD Note Manager', main_layout, finalize = True, use_default_focus = True, grab_anywhere_using_control = True, resizable = True, use_ttk_buttons = True, ttk_theme = sg.DEFAULT_TTK_THEME)
+    with open ("assets/head.png", "rb") as ico:
+        s = base64.b64encode(ico.read())
+    win = sg.Window('MD Note Manager', main_layout, finalize = True, use_default_focus = True, grab_anywhere_using_control = True, resizable = True, use_ttk_buttons = True, ttk_theme = sg.DEFAULT_TTK_THEME, icon = s)
     rwidth = win['-RIGHT_PANE-'].get_size()[0]
     lwidth = win['-LEFT_PANE-'].get_size()[0]
     win['-PANE-'].widget.paneconfig (win['-MIDDLE_PANE-'].widget, minsize = 272)
@@ -231,7 +259,7 @@ def create_gui (theme = default_theme, label_tree = None):
     sg.set_options(font=font)
     window = make_main_window (cal, label_tree = label_tree)
     cal.init_cal (window)
-    cardbox.init (window)
+    cardbox.init (window, window[cardbox.name].TKColFrame.yscroll)
 
     return window
 
@@ -242,7 +270,7 @@ def make_theme_window (theme):
               [sg.Listbox(values=sg.theme_list(), size=(20, 12), key='-LIST-', enable_events = True, select_mode = "LISTBOX_SELECT_MODE_SINGLE")],
               [sg.Button('OK'), sg.Button('Exit')]]
 
-    return ext_sg.Window('Theme Browser', layout, modal = True, finalize = True)
+    return sg.Window('Theme Browser', layout, modal = True, finalize = True)
 
 def theme_change (cfg):
     old_theme = sg.theme ()

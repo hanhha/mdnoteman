@@ -2,10 +2,11 @@
 
 import re
 import markdown
+from markdown import util
+import requests
 from PIL import Image, ImageDraw, ImageFont
 from functools import reduce
 from pathlib import Path
-import pprint
 
 home = Path.home()
 
@@ -13,30 +14,14 @@ BULLET_DIAMETER = 4
 IMAGE_BLOCK_HEIGHT = 1000
 font_dir = str(Path.home ()) + "/Library/Fonts/"
 
-class ImageExtension(markdown.Extension):
-    def __init__(self, width_spec, config):
-        self.config = config
-        self.width_spec = width_spec
-
-    def get_links(self):
-        return self.treeprocessor.get_links()
-
-    def get_image(self):
-        return self.treeprocessor.get_image()
-
-    def extendMarkdown(self, md):
-        self.treeprocessor = ImageTreeprocessor(self.width_spec, self.config)
-        md.treeprocessors.register (self.treeprocessor, 'm2png', 105)
-
-
-class ImageTreeprocessor(markdown.treeprocessors.Treeprocessor):
+class Markdown_Ext (markdown.Markdown):
     """
     Recusively walks the parsed markdown and renders to an image.  Uses chunks
     of IMAGE_BLOCK_HEIGHT to render parts of the markdown incrementally (without
-    pre-measuring) and assembles the chunks at the end. 
+    pre-measuring) and assembles the chunks at the end.
     """
 
-    def __init__(self, width_spec, config = None):
+    def init (self):
         # List of (Image, height) to be merged for the result
         self.image = None
         self.image_draw = None
@@ -49,10 +34,15 @@ class ImageTreeprocessor(markdown.treeprocessors.Treeprocessor):
         self.list_types = []
         self.list_item_nums = []
         self.y = 0
-        self.image_width = max(width_spec, key=lambda x: x[2])[2]
         self.images = []
         self.line_height = 0
         self.in_pre = False
+
+    def __init__(self, width_spec, config = None, **kwargs):
+        super().__init__ (**kwargs)
+        self.image_width = max(width_spec, key=lambda x: x[2])[2]
+
+        self.init ()
 
         self.config = {
             "bold_font_path": font_dir + "FreeSansBold.otf",
@@ -81,12 +71,12 @@ class ImageTreeprocessor(markdown.treeprocessors.Treeprocessor):
         self.default_font = ImageFont.truetype(default_font_path, font_size)
         self.bold_font = ImageFont.truetype(self.config["bold_font_path"], font_size)
         self.code_font = ImageFont.truetype(self.config["code_font_path"], self.config["code_font_size"])
-        self.h1_font = ImageFont.truetype(self.config["default_font_path"], font_size * 3)
-        self.h2_font = ImageFont.truetype(self.config["default_font_path"], int(font_size * 2.5))
-        self.h3_font = ImageFont.truetype(self.config["default_font_path"], font_size * 2)
-        self.h4_font = ImageFont.truetype(self.config["default_font_path"], int(font_size * 1.75))
-        self.h5_font = ImageFont.truetype(self.config["default_font_path"], int(font_size * 1.5))
-        self.h6_font = ImageFont.truetype(self.config["default_font_path"], int(font_size * 1.25))
+        self.h1_font = ImageFont.truetype(self.config["default_font_path"], font_size * 2)
+        self.h2_font = ImageFont.truetype(self.config["default_font_path"], int(font_size * 1.75))
+        self.h3_font = ImageFont.truetype(self.config["default_font_path"], font_size * 1.6)
+        self.h4_font = ImageFont.truetype(self.config["default_font_path"], int(font_size * 1.5))
+        self.h5_font = ImageFont.truetype(self.config["default_font_path"], int(font_size * 1.25))
+        self.h6_font = ImageFont.truetype(self.config["default_font_path"], int(font_size * 1))
         self.italics_font = ImageFont.truetype(self.config["italics_font_path"], font_size)
 
         self.width_spec = width_spec
@@ -104,35 +94,28 @@ class ImageTreeprocessor(markdown.treeprocessors.Treeprocessor):
     def compact_whitespace(self, text):
         return re.sub(r'\s+', ' ', text)
 
-    def ensure_image(self, h):
+    def ensure_image(self, h, retain = False, draw = True):
         self.apply_width_spec(h)
 
-        if self.image_y + h > self.image.size[1]:
+        if (not retain) and (self.image_y + h > self.image.size[1]):
             if self.image_y == 0:
                 print("Image block size too small!  Results will be cropped...")
                 return
 
             self.new_image_block()
+        else:
+            self.image = self.image.crop ((0, 0, self.image_width, self.image_y + h))
+            self.image_draw = ImageDraw.Draw(self.image)
 
-        return self.image_draw
-
-    def get_image(self):
-        # Add the last used image if necessary
-        self.save_image_block()
-
-        height = reduce(lambda x, y: x + y[1], self.images, 0)
-        final = Image.new("RGBA", (self.image_width, height))
-        y = 0
-        for img in self.images:
-            final.paste(img[0], (0, y))
-            y += img[1]
-
-        return final
+        if draw:
+            return self.image_draw
+        else:
+            return self.image
 
     def get_links(self):
         return self.links
 
-    def handle_a(self, node):
+    def handle_a (self, node):
         text = node.text
 
         if "href" in node.attrib:
@@ -143,7 +126,7 @@ class ImageTreeprocessor(markdown.treeprocessors.Treeprocessor):
         self.handle_children(node)
         self.render_text(node.tail, self.config["color"], False)
 
-    def handle_blockquote(self, node):
+    def handle_blockquote (self, node):
         indent = self.config["blockquote_indent"]
         self.indent += indent
         self.newline()
@@ -158,12 +141,12 @@ class ImageTreeprocessor(markdown.treeprocessors.Treeprocessor):
         self.handle_children(node)
         self.render_text(node.tail, self.config["color"], False)
 
-    def handle_children(self, node):
+    def handle_children (self, node):
         if len(node) > 0:
             for child in node:
                 self.handle_node(child)
 
-    def handle_div(self, node):
+    def handle_div (self, node):
         if self.image_x > self.start_x + self.indent:
             self.newline()
 
@@ -172,22 +155,23 @@ class ImageTreeprocessor(markdown.treeprocessors.Treeprocessor):
         if self.image_x > self.start_x + self.indent:
             self.newline()
 
-    def handle_em(self, node):
+    def handle_em (self, node):
         text = node.text
 
         self.render_text(node.text, self.config["color"], False, font=self.italics_font)
         self.handle_children(node)
         self.render_text(node.tail, self.config["color"], False)
 
-    def handle_h(self, node):
+    def handle_h (self, node):
         text = node.text
 
         font = getattr(self, node.tag + "_font")
         self.render_text(node.text, self.config["color"], True, font=font)
-        # TODO: Make this HR padding-bottom configurable
+        w, h = self.textsize (node.text, font = font)
+        self.line_height = max (h, self.line_height)
         self.newline()
 
-    def handle_hr(self, node):
+    def handle_hr (self, node):
         self.newline()
         h = self.config["margin_bottom"]
         horizontal_padding = self.config["hr_padding"]
@@ -195,7 +179,7 @@ class ImageTreeprocessor(markdown.treeprocessors.Treeprocessor):
                               self.end_x - horizontal_padding, self.image_y + h / 2), fill=self.config["hr_color"])
         self.newline(h)
 
-    def handle_li(self, node):
+    def handle_li (self, node):
         list_type = self.list_types[-1]
         if list_type == "unordered":
             # Draw the bullet
@@ -232,8 +216,9 @@ class ImageTreeprocessor(markdown.treeprocessors.Treeprocessor):
         # self.render_text(node.tail, self.config["color"], True)
         self.newline(self.config["list_item_margin_bottom"])
 
-    def handle_node(self, node):
-        print ("Handling %s : %s : %s" % (node.tag, node.text, node.tail))
+    def handle_node (self, node):
+        #print ("Handling %s : %s : %s" % (node.tag, node.text, node.tail))
+        #print (node.attrib)
         handlers = {
             "a": self.handle_a,
             "code": self.handle_code,
@@ -253,14 +238,15 @@ class ImageTreeprocessor(markdown.treeprocessors.Treeprocessor):
             "pre": self.handle_pre,
             "strong": self.handle_strong,
             "ul": self.handle_ul,
+            "img": self.handle_img,
         }
         handlers.get(node.tag, self.handle_unknown)(node)
         # print "Done with %s" % node.tag
 
-    def handle_ol(self, node):
+    def handle_ol (self, node):
         indent = self.config["list_indent"]
         self.indent += indent
-        self.newline()
+        self.newline ()
 
         self.list_types.append("ordered")
         self.list_item_nums.append(1)
@@ -269,38 +255,38 @@ class ImageTreeprocessor(markdown.treeprocessors.Treeprocessor):
         self.list_types = self.list_types[:-1]
 
         self.indent -= indent
-        self.newline()
+        self.newline ()
 
-    def handle_p(self, node):
+    def handle_p (self, node):
         self.render_text(node.text, self.config["color"], False)
         self.handle_children(node)
 
         self.render_text(node.tail, self.config["color"], True)
         self.newline(self.config["margin_bottom"])
 
-    def handle_pre(self, node):
+    def handle_pre (self, node):
         old_in_pre = self.in_pre
         self.in_pre = True
 
         indent = self.config["code_indent"]
         self.indent += indent
-        self.newline()
+        self.newline ()
 
         self.handle_children(node)
 
         self.indent -= indent
-        self.newline()
+        self.newline ()
 
         self.in_pre = old_in_pre
 
-    def handle_strong(self, node):
+    def handle_strong (self, node):
         text = node.text
 
         self.render_text(node.text, self.config["color"], False, font=self.bold_font)
         self.handle_children(node)
         self.render_text(node.tail, self.config["color"], False)
 
-    def handle_ul(self, node):
+    def handle_ul (self, node):
         indent = self.config["list_indent"]
         self.indent += indent
         self.newline()
@@ -312,11 +298,33 @@ class ImageTreeprocessor(markdown.treeprocessors.Treeprocessor):
         self.indent -= indent
         self.newline()
 
-    def handle_unknown(self, node):
+    def handle_img (self, node):
+        try:
+            rsp = requests.get(node.attrib['src'], stream = True)
+            img = Image.open (rsp.raw)
+        except:
+            img = None
+
+        if img:
+            self.render_img (img)
+        else:
+            has_alt = False
+            if 'alt' in node.attrib:
+                if node.attrib['alt'] != '':
+                    has_alt = True
+            if has_alt:
+                self.render_text (node.attrib['alt'], self.config["color"], False)
+            else:
+                self.render_text (node.attrib['src'], self.config["color"], False)
+
+        self.handle_children(node)
+        self.render_text(node.tail, self.config["color"], False)
+
+    def handle_unknown (self, node):
         print("Unknown tag: %s" % node.tag)
         self.handle_children(node)
 
-    def newline(self, h= -1):
+    def newline (self, h= -1):
         if h == -1:
             h = self.line_height
 
@@ -340,7 +348,7 @@ class ImageTreeprocessor(markdown.treeprocessors.Treeprocessor):
         _, _, width, height = draw.textbbox((0, 0), text=text, font=font)
         return width, height
 
-    def render_text(self, text, color, end_block=False, font=None):
+    def render_text(self, text, color, end_block=False, font=None, eliminate = None):
         if text is None:
             return
 
@@ -366,11 +374,15 @@ class ImageTreeprocessor(markdown.treeprocessors.Treeprocessor):
             end_index = 0
             draw = self.image_draw
 
-            parts = text.split(" ")
+            eliminate = '' if not eliminate else eliminate
+            if eliminate == '':
+                parts = text
+            else:
+                parts = text.split(eliminate)
             while end_index < len(parts):
                 w = 0
                 while end_index < len(parts):
-                    (w, h) = self.textsize(" ".join(parts[start_index:end_index + 1]),
+                    (w, h) = self.textsize(eliminate.join(parts[start_index:end_index + 1]),
                                            font=font)
                     if self.image_x + w > self.end_x:
                         break
@@ -382,17 +394,17 @@ class ImageTreeprocessor(markdown.treeprocessors.Treeprocessor):
                 if start_index == end_index:
                     end_index = start_index + 1
 
-                text_frag = " ".join(parts[start_index:end_index])
+                text_frag = eliminate.join(parts[start_index:end_index])
                 draw = self.ensure_image(h)
 
                 self.line_height = max(h, self.line_height)
 
-                # print "Rendering %s" % text_frag
+                #print ("Rendering %s" % text_frag)
                 draw.text((self.image_x, self.image_y),
                           text_frag,
                           font=font, fill=color)
 
-                # Get a real measurement segment 
+                # Get a real measurement segment
                 (w, h) = self.textsize(text_frag,
                                        font=font)
                 blocks.append((self.image_x, self.y, w, h))
@@ -400,7 +412,7 @@ class ImageTreeprocessor(markdown.treeprocessors.Treeprocessor):
                 if end_index < len(parts):
                     self.newline()
                 else:
-                    # If we are at the end of a block, write out a newline 
+                    # If we are at the end of a block, write out a newline
                     if end_block:
                         self.newline()
                     # Otherwise, leave X at the end of the last word
@@ -411,16 +423,78 @@ class ImageTreeprocessor(markdown.treeprocessors.Treeprocessor):
 
         return blocks
 
+    def render_img (self, img = None):
+        if img is None:
+            return
+
+        w, h = img.size
+
+        if self.image_x + w > self.end_x:
+            if w > self.image_width:
+                img = img.resize ((self.image_width, int (self.image_width * (h/w))))
+            self.newline ()
+
+        draw = self.ensure_image(h, retain = True, draw = False)
+        self.line_height = max (img.size[1], self.line_height)
+
+        draw.paste (img, (self.image_x, self.y))
+
+        if self.image_x + img.size[0] > self.end_x:
+            self.newline()
+        else:
+            self.image_x += img.size[0]
+
     def save_image_block(self):
         if self.image is not None:
             self.images.append((self.image, self.image_y))
-            del self.image_draw
+            try:
+                del self.image_draw
+            except:
+                pass
 
-    def run(self, root):
+            self.image = None
+
+    def convert_img (self, source):
+        # Fixup the source text
+        if not source.strip():
+            return ''  # a blank unicode string
+
+        try:
+            source = str (source)
+        except UnicodeDecodeError as e:  # pragma: no cover
+            # Customise error message while maintaining original trackback
+            e.reason += '. -- Note: Markdown only accepts unicode input!'
+            raise
+
+        # Split into lines and run the line preprocessors.
+        self.lines = source.split("\n")
+        for prep in self.preprocessors:
+            self.lines = prep.run(self.lines)
+
+        # Parse the high-level elements.
+        root = self.parser.parseDocument(self.lines).getroot()
+
+        # Run the tree-processors
+        for treeprocessor in self.treeprocessors:
+            newRoot = treeprocessor.run(root)
+            if newRoot is not None:
+                root = newRoot
+
         self.new_image_block()
         self.handle_node(root)
 
-        return root
+        # Add the last used image if necessary
+        self.save_image_block()
+
+        height = reduce(lambda x, y: x + y[1], self.images, 0)
+        final = Image.new("RGBA", (self.image_width, height))
+        y = 0
+        for img in self.images:
+            final.paste(img[0], (0, y))
+            y += img[1]
+
+        self.init ()
+        return final
 
 def md2png(md_str, width_spec, config = None):
     """
@@ -431,20 +505,15 @@ def md2png(md_str, width_spec, config = None):
                 the next greater y-offset.  The largest y-offset will be used
                 until the end of rendering.
     """
-    img_ext = ImageExtension(width_spec, config)
-
-    md = markdown.Markdown(extensions=[img_ext])
-    md.convert(md_str)
-
-    # print img_ext.get_links()
-    return img_ext.get_image()
+    md = Markdown_Ext (width_spec, config)
+    return md.convert_img(md_str)
 
 if __name__ == '__main__':
     markdown_text = """
 # Heading
 ## Subheading
 
-This is some text with [link](https://www.google.com/) and an image ![image](https://vi.wiktionary.org/static/images/icons/wiktionary.svg)
+This is some text with [link](https://www.google.com/) and an image ![image](https://upload.wikimedia.org/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png). Tnat's it!!!
 """
     output_filename = 'output.png'
     img = md2png (markdown_text, [(0, 0, 100)])
