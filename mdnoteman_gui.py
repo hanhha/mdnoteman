@@ -12,10 +12,11 @@ import tkinter as tk
 from md2img import Markdown_Ext
 from mdnoteman_pkm import Note, Notebook
 from dataclasses import dataclass, field
-from typing import List, Dict
+from typing import List, Dict, Set
 from PIL import Image, ImageDraw, ImageFont
 import io
 import base64
+from mdnoteman_dsl import lexer
 
 default_theme = 'SystemDefault1'
 window        = None
@@ -65,10 +66,12 @@ class CardBox:
     window: sg.Window = None
     name  : str = ''
     width : int = 768
-    tags_oi: List[str] = field (default_factory = lambda: [])
-    labels_oi: List[str] = field (default_factory = lambda: [])
-    tags_oni: List[str] = field (default_factory = lambda: [])
-    labels_oni: List[str] = field (default_factory = lambda: [])
+    tags_oi: Set[str] = field (default_factory = lambda: [])
+    labels_oi: Set[str] = field (default_factory = lambda: [])
+    tags_oni: Set[str] = field (default_factory = lambda: [])
+    labels_oni: Set[str] = field (default_factory = lambda: [])
+    tags: Dict = field (default_factory = lambda: {})
+    labels: Dict = field (default_factory = lambda: {})
 
     def scroll_handle (self, event):
         if self.container_scroll_cb:
@@ -114,15 +117,28 @@ class CardBox:
 
 
     def add_cards (self, notes):
+        print ("Adding cards to box ...")
         for note in notes:
             card = NoteCard(note = note, name = note.name)
             card.init ()
             self.cards.insert (0, card)
+            for t in note.tags:
+                if t not in self.tags:
+                    self.tags [t] = [card]
+                else:
+                    self.tags [t] += [card]
+            for l in note.labels:
+                if l not in self.labels:
+                    self.labels [l] = [card]
+                else:
+                    self.labels [l] += [card]
 
         self.filter_cards ()
 
         if self.window:
             self.refresh_box ()
+
+        print ("Done.")
 
     def erase (self):
         self.window[(self.name, "graph")].set_size ((self.width, 1))
@@ -176,10 +192,10 @@ def make_label_tree (label_tree = None):
 
     def parse_nested_label (label_tree, parent_key = ""):
         #for lbl in sorted(label_tree, key = lambda x: x['txt']):
-        for lbl in label_tree:
-            sg_lbl_tree.Insert (parent = parent_key, key = f"{parent_key}-lbl-{lbl['txt']}", text = f"{lbl['txt']} ({lbl['count']})", values = [])
-            if lbl['children']:
-                parse_nested_label (label_tree = lbl['children'], parent_key = f"{parent_key}-lbl-{lbl['txt']}")
+        for lbl in sorted (label_tree.keys()):
+            sg_lbl_tree.Insert (parent = parent_key, key = f"{parent_key}-lbl-{lbl}", text = f"{lbl} ({label_tree[lbl]['count']})", values = [])
+            if label_tree[lbl]['children']:
+                parse_nested_label (label_tree = label_tree[lbl]['children'], parent_key = f"{parent_key}-lbl-{lbl}")
 
     if label_tree:
         parse_nested_label (label_tree)
@@ -202,7 +218,7 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
                               vertical_alignment = 'top',
                               expand_x = True, expand_y = True, size = (cardbox.width, None))]]
 
-    layout_nested_labels = [[sg.Tree(data = make_label_tree (label_tree),
+    layout_nested_labels = [[sg.Tree(data = sg.TreeData(),
                                      auto_size_columns = True,
                                      select_mode = sg.TABLE_SELECT_MODE_EXTENDED,
                                      num_rows = 20,
@@ -215,7 +231,10 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
 
     cal_layout = cal.make_cal_layout ()
 
-    layout_tags = [[sg.Listbox (["all"], expand_x = True, expand_y = True, key = '-TAGS-')]]
+    layout_tags = [[sg.Listbox (["all"], expand_x = True, expand_y = True,
+                                key = '-TAGS-',
+                                enable_events = True,
+                                select_mode = sg.TABLE_SELECT_MODE_EXTENDED)]]
 
     middle_frame = sg.Frame ("Notes", key = '-MIDDLE_FRAME-', layout = layout_mid, expand_x = True, expand_y = True)
 
@@ -226,8 +245,13 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
                         orientation = 'horizontal', expand_x = True, expand_y = True, key = '-PANE-', relief = 'groove', show_handle = False)
 
     main_layout =  [[sg.Menu (menu_def)]]
-    main_layout += [[sg.Button ('New Note'), sg.Input (key = '-SEARCH-', expand_x = True), sg.Button ('Graph View'), sg.Button ('Refresh')]]
+    main_layout += [[sg.Button ('New Note'),
+                     sg.Input (key = '-SEARCH-', expand_x = True,
+                               default_text = 'Search query', do_not_clear = True),
+                     sg.Button ('Graph View'),
+                     sg.Button ('Refresh')]]
     main_layout += [[main_pane]]
+    main_layout += [[sg.Frame ("Info", layout = [[sg.Multiline (key = '-INFO-', expand_x = True, disabled = True, size = (None, 5), write_only = True, reroute_stdout = True)]], expand_x = True)]]
 
     with open ("assets/head.png", "rb") as ico:
         s = base64.b64encode(ico.read())
@@ -239,9 +263,10 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
     win['-PANE-'].widget.paneconfig (win['-LEFT_PANE-'].widget, minsize = lwidth)
     win.set_min_size ((lwidth + rwidth + 280, 200))
 
-    win.bind ("<ButtonPress-1>", ' Press')
-    win.bind ("<ButtonRelease-1>", ' Release')
+    #win.bind ("<ButtonPress-1>", ' Press')
+    #win.bind ("<ButtonRelease-1>", ' Release')
     win.bind ("<Configure>", ' Resize')
+    win['-SEARCH-'].bind ("<Return>", "")
     #win['-PANE-'].bind ("<B1-Motion>", ' Drag')
     #win['-NESTED_LBL-'].bind ("<ButtonPress-1>", ' Press')
     #win['-NESTED_LBL-'].bind ("<ButtonRelease-1>", ' Release')
@@ -249,6 +274,19 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
     #win['-TAGS-'].bind ("<ButtonRelease-1>", ' Release')
     #win['-TAGS-'].bind ("<B1-Motion>", ' Drag')
     return win
+
+def update_show_labels (lbl_tree):
+    if lbl_tree:
+        tree_data = make_label_tree (lbl_tree)
+        window ["-NESTED_LBL-"].update (values = tree_data)
+
+def update_show_tags (tags = None):
+    if tags:
+        values = ["all"]
+        for k,v in tags.items():
+            values.append (f"{k} ({v})")
+
+        window ["-TAGS-"].update (values = values)
 
 def create_gui (theme = default_theme, label_tree = None):
     global cal
@@ -321,6 +359,21 @@ def handle (setting_cb, open_cb):
         cardbox_width = window[cardbox.name].get_size ()[0]
         if abs (cardbox_width - cardbox.width) > 230:
             window.write_event_value (cardbox.name, cardbox_width)
+
+    if event == '-NESTED_LBL-':
+        select = []
+        for val in values ['-NESTED_LBL-']:
+            select.append ('/'.join(val.split ('-lbl-'))[1:])
+        print (select)
+
+    if event == '-TAGS-':
+        select = []
+        for val in values ['-TAGS-']:
+            select.append (val.split (' ')[0])
+        print (select)
+
+    if event == '-SEARCH-':
+        print (values["-SEARCH-"])
 
     if event == 'Settings':
         setting_cb ()

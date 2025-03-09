@@ -72,6 +72,9 @@ if __name__ == "__main__":
     gui.window = create_gui (default_theme)
 
     gui.cardbox.add_cards (Nb.notes)
+    gui.update_show_tags (Nb.tags)
+    gui.update_show_labels (Nb.labels)
+
     gui.window.timer_start (200)
 
     while gui.handle (setting_cb = lambda : call_settings (), open_cb = call_open):
