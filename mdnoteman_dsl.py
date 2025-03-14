@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import ply.lex as lex
+import re
 
 # Token definitions
 tokens = (
@@ -12,6 +13,7 @@ tokens = (
     'IDEN',
     'LPAREN',
     'RPAREN',
+    'CTN',
 )
 
 # Ignore chars
@@ -37,18 +39,23 @@ def t_AND (t):
     return t
 
 def t_OR (t):
-    r'(\b[Oo][Rr]\b|\|)'
+    r'(\b[Oo][Rr]\b|\||,)'
     t.type = 'OR'
     return t
 
 def t_NOT (t):
-    r'\b[Nn][Oo][Tt]\b'
+    r'\b[Nn][Oo][Tt]\b|!|~'
     t.type = 'NOT'
     return t
 
 def t_IDEN (t):
-    r'\b[_a-zA-Z0-9]+\b'
+    r'\b[^,|&!~\s|]+\b'
     t.type = 'IDEN'
+    return t
+
+def t_CTN (t):
+    r'["\'](\b.+\b)+["\']'
+    t.type = 'CTN'
     return t
 
 # Error handling rule
@@ -58,10 +65,220 @@ def t_error(t):
 
 lexer = lex.lex ()
 
+class Node():
+    def __init__ (self, type, value = False, children = None):
+        self._type  = type
+        self._value = value
+        self._children  = children or []
+
+    def analyze (self, **kwargs):
+        pass
+
+    def acquire (self, Node):
+        self._children.append (Node)
+        return True
+
+    def __str__ (self, indent = '  '):
+        return f"{self.type}: {self.value}\n{indent}{('\n' + indent).join([c.__str__() for c in self._children])}"
+
+    def reduce (self):
+        i = 0
+        if len(self._children) > 0:
+            while (True):
+                if (self._children[i].type == self.type):
+                    tmp = self._children.pop (i)
+                    extra = tmp._children
+                    for e in extra:
+                        e.reduce ()
+                        self._children.insert (i, e)
+                if self._children[i].type != self.type:
+                    i += 1
+                    if i == len (self._children):
+                        break
+
+    @property
+    def type (self):
+        return self._type
+
+    @property
+    def value (self):
+        return self._value
+
+class NotNode (Node):
+    def __init__ (self, value = False, children = None):
+        super().__init__ (type = 'NOT', children = children)
+
+    def analyze (self, **kwargs):
+        if len (self._children) == 1:
+            self._value = not self._children[0].analyze (**kwargs)
+        else:
+            raise ValueError ("Invald AST - NOT must have only 1 child node")
+        return self._value
+
+    def acquire (self, Node):
+        if len(self._children) == 0:
+            self._children.append (Node)
+            return True
+        else:
+            return False
+
+    def __str__ (self, indent = '  '):
+        return f"{self.type}\n{indent}{('\n'+indent).join([c.__str__(indent + '  ') for c in self._children])}"
+
+class OrNode (Node):
+    def __init__ (self, value = False, children = None):
+        super().__init__ (type = 'OR', children = children)
+
+    def analyze (self, **kwargs):
+        self._value = False
+        if len(self._children) > 0:
+            for child in self._children:
+                if child.analyze (**kwargs):
+                    self._value = True
+                    break
+        else:
+            raise ValueError ("Invald AST - OR must have at least 1 child node")
+        return self._value
+
+    def __str__ (self, indent = '  '):
+        return f"{self.type}\n{indent}{('\n'+indent).join([c.__str__(indent + '  ') for c in self._children])}"
+
+class AndNode (Node):
+    def __init__ (self, value = False, children = None):
+        super().__init__ (type = 'AND', children = children)
+
+    def analyze (self, **kwargs):
+        self._value = True
+        if len(self._children) > 0:
+            for child in self._children:
+                if not child.analyze (**kwargs):
+                    self._value = False
+                    break
+        else:
+            raise ValueError ("Invald AST - AND must have at least 1 child node")
+        return self._value
+
+    def __str__ (self, indent = '  '):
+        return f"{self.type}\n{indent}{('\n'+indent).join([c.__str__(indent + '  ') for c in self._children])}"
+
+class EqlNode (Node):
+    def __init__ (self, children = None):
+        super().__init__ (type = 'EQL', children = children)
+
+    def __str__ (self, indent = '  '):
+        return f"{self.type}  {self._children[0].type} == {self._children[0].value}"
+
+    def analyze (self, **kwargs):
+        self._value = True
+        if len(self._children) == 1:
+            if self._children[0].type == 'LABEL':
+                if 'labels' in kwargs:
+                    for lbl in kwargs['label']:
+                        if self._children[0].value.lower() == lbl.lower():
+                           self._value = True
+                           break
+                else:
+                    self._value = False
+            elif self._children[0].type == 'TAG':
+                if 'tags' in kwargs:
+                    for tag in kwargs['tag']:
+                        if self._children[0].value.lower() == tag.lower():
+                           self._value = True
+                           break
+                    pass
+                else:
+                    self._value = False
+            elif self._children[0].type == 'CTN':
+                if 'ctn' in kwargs:
+                    self._value = re.sub(' +', ' ', self._children[0].value.casefold()) in  re.sub(' +', ' ', kwargs['ctn'].casefold())
+                else:
+                    self._value = False
+            else:
+                raise ValueError ("Invald AST - Invalid type %s in EQL node" %(self._children[0]))
+        else:
+            raise ValueError ("Invald AST - EQL must have only 1 child node")
+        return self._value
+
+    def acquire (self, Node):
+        if len(self._children) == 0:
+            self._children.append (Node)
+            return True
+        else:
+            return False
+
+def build_ast (tokens, factor = None):
+    stack      = [OrNode()]
+    indent     = 0
+    _factor     = factor
+    inv_factor = False
+    inv        = False
+    subtoks    = []
+
+    for tok in tokens:
+        if tok.type == 'LPAREN':
+            indent += 1
+        elif tok.type == 'RPAREN':
+            indent -= 1
+            if (indent == 0):
+                if (len(subtoks) > 0):
+                    node = build_ast (subtoks, _factor)
+                    stack[-1].acquire (node)
+                    subtoks = []
+                else:
+                    raise ValueError ("Invald syntax - ')' is not expected")
+        else:
+            if indent > 0:
+                subtoks.append (tok)
+            else:
+                #print (f"{tok.type} -> {tok.value}")
+                if tok.type == 'CTN':
+                    _factor = None
+                    node = EqlNode ([Node(tok.type, tok.value)])
+                    if not stack[-1].acquire (node):
+                        tmp_node = stack.pop ()
+                        stack[-1].acquire (tmp_node)
+                        stack.append (node)
+                elif tok.type in ('LABEL', 'TAG'):
+                    _factor = tok.type
+                    node = OrNode ()
+                    stack.append (node)
+                elif tok.type == 'NOT':
+                    node = NotNode ()
+                    stack.append (node)
+                elif tok.type == 'IDEN':
+                    if _factor is None:
+                        node = EqlNode ([Node('CTN', tok.value)])
+                    else:
+                        node = EqlNode ([Node(_factor, tok.value)])
+                    if not stack[-1].acquire (node):
+                        tmp_node = stack.pop ()
+                        stack[-1].acquire (tmp_node)
+                        stack.append (node)
+                elif tok.type == 'AND':
+                    prev_node = stack.pop ()
+                    if prev_node.type == 'OR':
+                        stack.append (prev_node)
+                        prev_node = stack[-1]._children.pop ()
+                    node = AndNode (children = [prev_node])
+                    stack.append (node)
+                elif tok.type == 'OR':
+                    prev_node = stack.pop ()
+                    node = OrNode (children = [prev_node])
+                    stack.append (node)
+
+    while len(stack) > 1:
+        node = stack.pop ()
+        if not stack[-1].acquire (node):
+            tmp_node = stack.pop ()
+            stack[-1].acquire (tmp_node)
+            stack.append (node)
+    stack[0].reduce ()
+    #print (stack[0])
+    return stack[0]
+
 if __name__ == '__main__':
-    data = '& labels | label_aaa bbb & tag_ccc ddd tags | 123 tagcc tag_1'
+    #data = '"mama mama mama" (labels label_aaa/bbb, bbb & tag_ccc, ddd) ,  (tags 123, tagcc, tag_1)'
+    data = '"mama mama mama" labels label_aaa/bbb, bbb & tag_ccc, ddd tags 123, tagcc, tag_1'
 
     lexer.input (data)
-    # Tokenize
-    for tok in lexer:
-        print (tok)
+    print (build_ast (lexer))
