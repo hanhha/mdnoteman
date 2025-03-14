@@ -16,7 +16,7 @@ from typing import List, Dict, Set
 from PIL import Image, ImageDraw, ImageFont
 import io
 import base64
-from mdnoteman_dsl import lexer
+import mdnoteman_dsl as dsl
 
 default_theme = 'SystemDefault1'
 window        = None
@@ -90,31 +90,22 @@ class CardBox:
         """ return cards of interest """
         return self._cards_oi
 
-    def filter_cards (self, tags = None, labels = None, excl_tags = None, excl_labels = None):
-        self.tags_oi    = tags or self.tags_oi
-        self.labels_oi  = labels or self.labels_oi
-        self.tags_oni   = excl_tags or self.tags_oni
-        self.labels_oni = excl_labels or self.labels_oni
+    def filter (self, query_str = ''):
+        if query_str != '':
+            l = len (self.cards)
+            dsl.lexer.input (query_str)
+            flt = dsl.build_ast (dsl.lexer)
+            print (flt)
+            self._cards_oi = []
+            for i in range (l):
+                if flt.analyze (tags = self.cards[i].note.tags, labels = self.cards[i].note.labels, ctn = self.cards[i].note.content):
+                    self._cards_oi.append (self.cards[i])
+        else:
+            self._cards_oi = self.cards
 
-        self._cards_oi = []
-        for card in self.cards:
-            selected = False
-            l = len(self.labels_oi)
-            for lbl in card.note.labels:
-                if ((l == 0) or (lbl in self.labels_oi)) and (lbl not in self.labels_oni):
-                    selected = True
-                    break
-            if selected:
-                selected = False
-                l = len(self.tags_oi)
-                for tag in card.note.tags:
-                    if ((l == 0) or (tag in self.tags_oi)) and (tag not in self.tags_oni):
-                        selected = True
-                        break
-
-            if selected:
-                self._cards_oi.append (card)
-
+        if self.window:
+            self.erase ()
+            self.refresh_box ()
 
     def add_cards (self, notes):
         print ("Adding cards to box ...")
@@ -133,10 +124,7 @@ class CardBox:
                 else:
                     self.labels [l] += [card]
 
-        self.filter_cards ()
-
-        if self.window:
-            self.refresh_box ()
+        self.filter ()
 
         print ("Done.")
 
@@ -221,6 +209,7 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
     layout_nested_labels = [[sg.Tree(data = sg.TreeData(),
                                      auto_size_columns = True,
                                      select_mode = sg.TABLE_SELECT_MODE_EXTENDED,
+                                     click_toggles_select = True,
                                      num_rows = 20,
                                      key = '-NESTED_LBL-',
                                      show_expanded = False,
@@ -267,6 +256,7 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
     #win.bind ("<ButtonRelease-1>", ' Release')
     win.bind ("<Configure>", ' Resize')
     win['-SEARCH-'].bind ("<Return>", "")
+    win['-SEARCH-'].bind ('<FocusIn>', '+INPUT FOCUS+')
     #win['-PANE-'].bind ("<B1-Motion>", ' Drag')
     #win['-NESTED_LBL-'].bind ("<ButtonPress-1>", ' Press')
     #win['-NESTED_LBL-'].bind ("<ButtonRelease-1>", ' Release')
@@ -347,6 +337,22 @@ def theme_change (cfg):
 
     return cfg
 
+def collect_tags_labels (values):
+    query = ''
+    if len(values['-NESTED_LBL-']) > 0:
+        select = ''
+        for val in values ['-NESTED_LBL-']:
+            select += ',' + '/'.join(val.split('-lbl-'))[1:]
+        query += 'labels ' + select [1:]
+
+    if len (values['-TAGS-']) > 0:
+        select = ''
+        for val in values ['-TAGS-']:
+            select += ',' + val.split(' ')[0]
+        query += ('& ' if query != '' else '') + 'tags ' + select [1:]
+
+    return query
+
 def handle (setting_cb, open_cb):
     event, values = window.read(10)
 
@@ -360,35 +366,35 @@ def handle (setting_cb, open_cb):
         if abs (cardbox_width - cardbox.width) > 230:
             window.write_event_value (cardbox.name, cardbox_width)
 
-    if event == '-NESTED_LBL-':
-        select = []
-        for val in values ['-NESTED_LBL-']:
-            select.append ('/'.join(val.split ('-lbl-'))[1:])
-        print (select)
+    elif event in ('-NESTED_LBL-', '-TAGS-'):
+        window['-SEARCH-'].update (value = 'Search query')
+        query = collect_tags_labels (values)
+        #print (query)
+        if query != '':
+            cardbox.filter (query)
 
-    if event == '-TAGS-':
-        select = []
-        for val in values ['-TAGS-']:
-            select.append (val.split (' ')[0])
-        print (select)
+    elif event == '-SEARCH-':
+        #print (values["-SEARCH-"])
+        window['-TAGS-'].update (set_to_index = None)
+        cardbox.filter (values["-SEARCH-"])
 
-    if event == '-SEARCH-':
-        print (values["-SEARCH-"])
+    elif event == '-SEARCH-+INPUT FOCUS+':
+        window['-SEARCH-'].update (value = '')
 
-    if event == 'Settings':
+    elif event == 'Settings':
         setting_cb ()
         return True
 
-    if event == 'Open':
+    elif event == 'Open':
         open_cb ()
         return True
+
+    elif event in (None, sg.WINDOW_CLOSED, 'Exit'):
+        return False
 
     if event == cardbox.name:
         cardbox.resize (values ['cardbox'])
         return True
-
-    if event in (None, sg.WINDOW_CLOSED, 'Exit'):
-        return False
 
     # Call sub-components's handles
     cal.handle (event, values)

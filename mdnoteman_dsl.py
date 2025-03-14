@@ -89,12 +89,18 @@ class Node():
                     tmp = self._children.pop (i)
                     extra = tmp._children
                     for e in extra:
-                        e.reduce ()
                         self._children.insert (i, e)
                 if self._children[i].type != self.type:
+                    reduced = self._children[i].reduce ()
+                    if reduced is not None:
+                        self._children[i] = reduced
                     i += 1
                     if i == len (self._children):
                         break
+        if len (self._children) == 1 and self.type in ('OR', 'AND'):
+            return self._children [0]
+        else:
+            return None
 
     @property
     def type (self):
@@ -169,30 +175,25 @@ class EqlNode (Node):
         return f"{self.type}  {self._children[0].type} == {self._children[0].value}"
 
     def analyze (self, **kwargs):
-        self._value = True
         if len(self._children) == 1:
+            self._value = False
             if self._children[0].type == 'LABEL':
                 if 'labels' in kwargs:
-                    for lbl in kwargs['label']:
+                    for lbl in kwargs['labels']:
                         if self._children[0].value.lower() == lbl.lower():
                            self._value = True
                            break
-                else:
-                    self._value = False
             elif self._children[0].type == 'TAG':
-                if 'tags' in kwargs:
-                    for tag in kwargs['tag']:
+                if self._children[0].value.lower() == 'all':
+                    self._value = True
+                elif 'tags' in kwargs:
+                    for tag in kwargs['tags']:
                         if self._children[0].value.lower() == tag.lower():
                            self._value = True
                            break
-                    pass
-                else:
-                    self._value = False
             elif self._children[0].type == 'CTN':
                 if 'ctn' in kwargs:
                     self._value = re.sub(' +', ' ', self._children[0].value.casefold()) in  re.sub(' +', ' ', kwargs['ctn'].casefold())
-                else:
-                    self._value = False
             else:
                 raise ValueError ("Invald AST - Invalid type %s in EQL node" %(self._children[0]))
         else:
@@ -272,13 +273,16 @@ def build_ast (tokens, factor = None):
             tmp_node = stack.pop ()
             stack[-1].acquire (tmp_node)
             stack.append (node)
-    stack[0].reduce ()
+    reduced = stack[0].reduce ()
     #print (stack[0])
-    return stack[0]
+    return reduced if reduced is not None else stack [0]
+
+def filter (query_str):
+    lexer.input (query_str)
+    return (build_ast(lexer))
 
 if __name__ == '__main__':
     #data = '"mama mama mama" (labels label_aaa/bbb, bbb & tag_ccc, ddd) ,  (tags 123, tagcc, tag_1)'
-    data = '"mama mama mama" labels label_aaa/bbb, bbb & tag_ccc, ddd tags 123, tagcc, tag_1'
+    data = '"mama mama mama" labels label_aaa/bbb, bbb & tag_ccc, ddd & tags 123, tagcc, tag_1'
 
-    lexer.input (data)
-    print (build_ast (lexer))
+    print (filter (data))
