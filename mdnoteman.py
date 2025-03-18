@@ -24,7 +24,7 @@ else:
 
 default_theme = cfg ['Appearance']['Theme']
 
-Nb = Notebook ()
+Nb = Notebook (path = cfg['Notebook']['Path'])
 
 def save_config ():
     global cfgpath_str
@@ -67,7 +67,9 @@ def clean_up ():
     save_config ()
 
 if __name__ == "__main__":
-    Nb.Create_random_notes (num = 10)
+    #Nb.Create_random_notes (num = 10)
+    if cfg['Notebook']['Path'] != '':
+        Nb.Refresh ()
 
     gui.window = create_gui (default_theme)
 

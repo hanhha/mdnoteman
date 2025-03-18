@@ -99,9 +99,7 @@ class Markdown_Ext (markdown.Markdown):
 
         if (not retain) and (self.image_y + h > self.image.size[1]):
             if self.image_y == 0:
-                print("Image block size too small!  Results will be cropped...")
-                return
-
+                print("Image block size too small! Results will be cropped...")
             self.new_image_block()
         else:
             self.image = self.image.crop ((0, 0, self.image_width, self.image_y + h))
@@ -342,13 +340,13 @@ class Markdown_Ext (markdown.Markdown):
         self.image_y = 0
 
     @staticmethod
-    def textsize(text, font):
-        im = Image.new(mode="P", size=(0, 0))
-        draw = ImageDraw.Draw(im)
+    def textsize (text, font):
+        im = Image.new (mode="P", size=(0, 0))
+        draw = ImageDraw.Draw (im)
         _, _, width, height = draw.textbbox((0, 0), text=text, font=font)
-        return width, height
+        return width, height + 2
 
-    def render_text(self, text, color, end_block=False, font=None, eliminate = None):
+    def render_text(self, text, color, end_block=False, font=None, eliminate = ' '):
         if text is None:
             return
 
@@ -510,10 +508,9 @@ def md2png(md_str, width_spec, config = None):
 
 if __name__ == '__main__':
     markdown_text = """
-# Heading
-## Subheading
-
-This is some text with [link](https://www.google.com/) and an image ![image](https://upload.wikimedia.org/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png). Tnat's it!!!
+    	I have some ideas for new features of my bot:
+	1 - short lookup will generate command to show full description
+	2 - adding summary command for give link that will issue a summary by smmry.com website
 """
     output_filename = 'output.png'
     img = md2png (markdown_text, [(0, 0, 100)])

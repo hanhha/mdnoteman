@@ -47,10 +47,11 @@ class NoteCard:
         self.update ()
 
     def update (self):
-        ctn = self.md.convert_img (self.note.simple_content)
-        ctx = self.md.convert_img (self.note.simple_context)
-        ctn_h = 240 if (ctn.size[1] > 240) else ctn.size[1]
-        img = Image.new ("RGBA", (self.width, ctn_h + ctx.size [1]))
+        ctn       = self.md.convert_img (self.note.simple_content)
+        ctn_h     = 240 if (ctn.size[1] > 240) else ctn.size[1]
+        ctx       = self.md.convert_img (self.note.simple_context)
+        ctx_h     = ctx.size [1]
+        img = Image.new ("RGBA", (self.width, ctn_h + ctx_h))
         img.paste (ctn, (0, 0))
         img.paste (ctx, (0, ctn_h))
         bio = io.BytesIO ()
@@ -66,12 +67,6 @@ class CardBox:
     window: sg.Window = None
     name  : str = ''
     width : int = 768
-    tags_oi: Set[str] = field (default_factory = lambda: [])
-    labels_oi: Set[str] = field (default_factory = lambda: [])
-    tags_oni: Set[str] = field (default_factory = lambda: [])
-    labels_oni: Set[str] = field (default_factory = lambda: [])
-    tags: Dict = field (default_factory = lambda: {})
-    labels: Dict = field (default_factory = lambda: {})
 
     def scroll_handle (self, event):
         if self.container_scroll_cb:
@@ -91,44 +86,52 @@ class CardBox:
         return self._cards_oi
 
     def filter (self, query_str = ''):
+        changed = False
         if query_str != '':
             l = len (self.cards)
-            dsl.lexer.input (query_str)
-            flt = dsl.build_ast (dsl.lexer)
-            print (flt)
-            self._cards_oi = []
-            for i in range (l):
-                if flt.analyze (tags = self.cards[i].note.tags, labels = self.cards[i].note.labels, ctn = self.cards[i].note.content):
-                    self._cards_oi.append (self.cards[i])
+            try:
+                dsl.lexer.input (query_str)
+                flt = dsl.build_ast (dsl.lexer)
+            except ValueError as err:
+                print ("Invalid query string %s - Ignored" %(query_str))
+                flt = None
+            if flt:
+                print (flt)
+                self._cards_oi = []
+                tst_ovrd = False
+                for i in range (l):
+                    tst = False
+                    if not tst_ovrd:
+                        try:
+                            tst = flt.analyze (tags = self.cards[i].note.tags, labels = self.cards[i].note.labels, ctn = self.cards[i].note.content)
+                        except ValueError:
+                            print ("Invalid query string %s - Ignored" %(query_str))
+                            tst = True
+                            tst_ovrd = True
+                    if tst_ovrd or tst:
+                        self._cards_oi.append (self.cards[i])
+                changed = True
         else:
             self._cards_oi = self.cards
+            changed = True
 
-        if self.window:
+        if changed and self.window:
             self.erase ()
             self.refresh_box ()
 
     def add_cards (self, notes):
         print ("Adding cards to box ...")
         for note in notes:
-            card = NoteCard(note = note, name = note.name)
+            card = NoteCard(note = note)
             card.init ()
             self.cards.insert (0, card)
-            for t in note.tags:
-                if t not in self.tags:
-                    self.tags [t] = [card]
-                else:
-                    self.tags [t] += [card]
-            for l in note.labels:
-                if l not in self.labels:
-                    self.labels [l] = [card]
-                else:
-                    self.labels [l] += [card]
 
         self.filter ()
 
         print ("Done.")
 
     def erase (self):
+        self.window[self.name].set_vscroll_position (0)
         self.window[(self.name, "graph")].set_size ((self.width, 1))
         self.window[(self.name, "graph")].change_coordinates ((0, 1), (self.width, 0))
         self.window[(self.name, "graph")].erase()
@@ -240,7 +243,7 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
                      sg.Button ('Graph View'),
                      sg.Button ('Refresh')]]
     main_layout += [[main_pane]]
-    main_layout += [[sg.Frame ("Info", layout = [[sg.Multiline (key = '-INFO-', expand_x = True, disabled = True, size = (None, 5), write_only = True, reroute_stdout = True)]], expand_x = True)]]
+    main_layout += [[sg.Frame ("Info", layout = [[sg.Multiline (key = '-INFO-', expand_x = True, disabled = True, size = (None, 5), write_only = True, reroute_stdout = True, autoscroll = True)]], expand_x = True)]]
 
     with open ("assets/head.png", "rb") as ico:
         s = base64.b64encode(ico.read())
@@ -273,8 +276,8 @@ def update_show_labels (lbl_tree):
 def update_show_tags (tags = None):
     if tags:
         values = ["all"]
-        for k,v in tags.items():
-            values.append (f"{k} ({v})")
+        for k in sorted(tags.keys()):
+            values.append (f"{k} ({tags[k]})")
 
         window ["-TAGS-"].update (values = values)
 
