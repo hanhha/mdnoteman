@@ -7,6 +7,7 @@ if sys.hexversion < 0x03070000:
 
 import FreeSimpleGUI as sg
 from fsg_calendar import Calendar
+import fsg_extend as esg
 from tkhtmlview import html_parser
 import tkinter as tk
 from md2img import Markdown_Ext
@@ -75,9 +76,12 @@ class CardBox:
 
     @property
     def layout (self):
-        _layout = [(sg.Graph (key = (self.name, "graph"),
+        comm_menu = ["",["that","this","there",['Thing1','Thing2',"those"]]]
+        note_menu = ["",["Color::fig_menu","Add label::fig_menu","Add tag::fig_menu", "Delete::fig_menu"]]
+        _layout = [(esg.Graph (key = (self.name, "graph"),
                               canvas_size = (self.width, 1), graph_bottom_left = (0, 1), graph_top_right = (self.width, 0),
-                              expand_x = True, expand_y = True, enable_events = True, drag_submits = True))]
+                               expand_x = True, expand_y = True, enable_events = True, drag_submits = True,
+                               comm_right_click_menu = comm_menu, fig_right_click_menu = note_menu))]
         return [_layout]
 
     @property
@@ -198,10 +202,10 @@ def make_label_tree (label_tree = None):
 cardbox = CardBox (name = 'cardbox')
 
 def make_main_window (cal, label_tree = None, tags = None, notes = None):
-    menu_def = [['&Notebook', ['&Open', '---', 'E&xit']],
-                ['&Edit', ['Copy (&C)', 'Cut (&X)', 'Paste (&V)', '&Undo', '&Redo']],
-                ['T&ool', ['Settings']],
-                ['&Help', ['&About...']]]
+    menu_def = [['&Notebook', ['&Open::menu', '---', 'E&xit::menu']],
+                ['&Edit', ['Copy (&C)::menu', 'Cut (&X)::menu', 'Paste (&V)::menu', '&Undo::menu', '&Redo::menu']],
+                ['T&ool', ['Settings::menu']],
+                ['&Help', ['&About...::menu']]]
 
     mene_elem  = sg.Menu (menu_def)
     layout_mid = [[sg.Column (key = cardbox.name, layout = cardbox.layout, pad = 0,
@@ -247,7 +251,9 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
 
     with open ("assets/head.png", "rb") as ico:
         s = base64.b64encode(ico.read())
-    win = sg.Window('MD Note Manager', main_layout, finalize = True, use_default_focus = True, grab_anywhere_using_control = True, resizable = True, use_ttk_buttons = True, ttk_theme = sg.DEFAULT_TTK_THEME, icon = s)
+    win = sg.Window('MD Note Manager', main_layout, finalize = True,
+                    use_default_focus = True, grab_anywhere_using_control = True,
+                    resizable = True, use_ttk_buttons = True, ttk_theme = sg.DEFAULT_TTK_THEME, icon = s)
     rwidth = win['-RIGHT_PANE-'].get_size()[0]
     lwidth = win['-LEFT_PANE-'].get_size()[0]
     win['-PANE-'].widget.paneconfig (win['-MIDDLE_PANE-'].widget, minsize = 272)
@@ -366,7 +372,7 @@ def handle (setting_cb, open_cb):
     if event in ('__TIMER EVENT__', ' Resize'):
         # If cardbox was changed size, trigger refresh cardbox view
         cardbox_width = window[cardbox.name].get_size ()[0]
-        if abs (cardbox_width - cardbox.width) > 230:
+        if abs (cardbox_width - (cardbox.width + 15)) > 256:
             window.write_event_value (cardbox.name, cardbox_width)
 
     elif event in ('-NESTED_LBL-', '-TAGS-'):
@@ -384,11 +390,11 @@ def handle (setting_cb, open_cb):
     elif event == '-SEARCH-+INPUT FOCUS+':
         window['-SEARCH-'].update (value = '')
 
-    elif event == 'Settings':
+    elif event == 'Settings::menu':
         setting_cb ()
         return True
 
-    elif event == 'Open':
+    elif event == 'Open::menu':
         open_cb ()
         return True
 
