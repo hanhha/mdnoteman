@@ -30,7 +30,6 @@ class NoteCard:
     width: int = 240
     _thumbnail: Image = None
     _thumbnail_bio: io.BytesIO = None
-    md : Markdown_Ext = None
 
     @property
     def thumbnail (self):
@@ -43,14 +42,13 @@ class NoteCard:
     def set_fig (self, fig):
         self.fig = fig
 
-    def init (self):
-        self.md = Markdown_Ext ([(0, 0, self.width)], {'color': (0,0,0,255), 'margin_bottom': 8})
-        self.update ()
+    def init (self, md = None):
+        self.update (md)
 
-    def update (self):
-        ctn       = self.md.convert_img (self.note.simple_content)
+    def update (self, md):
+        ctn       = md.convert_img (self.note.simple_content)
         ctn_h     = 240 if (ctn.size[1] > 240) else ctn.size[1]
-        ctx       = self.md.convert_img (self.note.simple_context)
+        ctx       = md.convert_img (self.note.simple_context)
         ctx_h     = ctx.size [1]
         img = Image.new ("RGBA", (self.width, ctn_h + ctx_h))
         img.paste (ctn, (0, 0))
@@ -63,11 +61,19 @@ class NoteCard:
 
 @dataclass
 class CardBox:
-    cards : List[NoteCard] = field (default_factory = lambda: [])
-    n_cols: int = 3
-    window: sg.Window = None
-    name  : str = ''
-    width : int = 768
+    cards    : List[NoteCard] = field (default_factory = lambda: [])
+    notebook : Notebook = None
+    n_cols   : int = 3
+    window   : sg.Window = None
+    name     : str = ''
+    width    : int = 768
+    md       : Markdown_Ext = None
+
+    def get_note_by_timestamp (self, timestamp):
+        for note in self.cards:
+            if note.note.timestamp == timestamp:
+                return note
+        return None
 
     def scroll_handle (self, event):
         if self.container_scroll_cb:
@@ -77,7 +83,14 @@ class CardBox:
     @property
     def layout (self):
         comm_menu = ["",["that","this","there",['Thing1','Thing2',"those"]]]
-        note_menu = ["",["Color::fig_menu","Add label::fig_menu","Add tag::fig_menu", "Delete::fig_menu"]]
+        note_menu = ["",["Color", ['White::fig_colorFFFFFF',
+                                   'Pink::fig_colorFF69B4',
+                                   'Gray::fig_colorABABAB',
+                                   'Yellow::fig_colorFFFF00',
+                                   'Light Blue::fig_color87CEFA',
+                                   'Light Green::fig_color90EE90',
+                                   'Light Purple::fig_color9370DB'],
+                         "Add label::fig_menu","Add tag::fig_menu", "Delete::fig_menu"]]
         _layout = [(esg.Graph (key = (self.name, "graph"),
                               canvas_size = (self.width, 1), graph_bottom_left = (0, 1), graph_top_right = (self.width, 0),
                                expand_x = True, expand_y = True, enable_events = True, drag_submits = True,
@@ -119,20 +132,33 @@ class CardBox:
             self._cards_oi = self.cards
             changed = True
 
-        if changed and self.window:
-            self.erase ()
+        if changed:
             self.refresh_box ()
 
-    def add_cards (self, notes):
-        print ("Adding cards to box ...")
-        for note in notes:
+    def set_notebook (self, nb):
+        self.notebook = nb
+        self.sync_cards ()
+
+    def sync_cards (self):
+        print ("Syncing cards to box ...")
+
+        for note in self.notebook.notes:
             card = NoteCard(note = note)
-            card.init ()
-            self.cards.insert (0, card)
+            card.init (self.md)
+            self.add_or_replace (card)
 
         self.filter ()
 
         print ("Done.")
+
+    def add_or_replace (self, card):
+        for i in range(len(self.cards)):
+            if self.cards[i].note.timestamp == card.note.timestamp:
+                ret = self.cards[i]
+                self.cards[i] = card
+                return ret
+        self.cards.insert (0, card)
+        return None
 
     def erase (self):
         self.window[self.name].set_vscroll_position (0)
@@ -146,38 +172,74 @@ class CardBox:
         self.n_cols = self.width // 256
 
         if self.n_cols != old_n_cols:
-            self.erase ()
             self.refresh_box ()
 
     def refresh_box (self):
         self.n_cols = self.width // 256
         N = len (self.cards_oi)
 
-        c = 0
-        for n in range (N):
-            i = 1
-            y = 0
-            upper_n = n - i*self.n_cols
-            while (upper_n >= 0):
-                y += (self.cards_oi[upper_n].thumbnail.size[1] + 16)
-                i += 1
+        if self.window:
+            self.erase ()
+
+            c = 0
+            for n in range (N):
+                i = 1
+                y = 0
                 upper_n = n - i*self.n_cols
+                while (upper_n >= 0):
+                    y += (self.cards_oi[upper_n].thumbnail.size[1] + 16)
+                    i += 1
+                    upper_n = n - i*self.n_cols
 
-            w,h = self.cards_oi[n].thumbnail.size
-            if y + 16 + h > self.window[(self.name, "graph")].CanvasSize [1]:
-                self.window[(self.name, "graph")].set_size ((self.width, y + 16 + h))
-                self.window[(self.name, "graph")].change_coordinates ((0, y + 16 + h), (self.width, 0))
+                w,h = self.cards_oi[n].thumbnail.size
+                if y + 16 + h > self.window[(self.name, "graph")].CanvasSize [1]:
+                    self.window[(self.name, "graph")].set_size ((self.width, y + 16 + h))
+                    self.window[(self.name, "graph")].change_coordinates ((0, y + 16 + h), (self.width, 0))
 
-            bg  = self.window[(self.name, "graph")].draw_rectangle (top_left = (c * 256 + 6, y + 6), bottom_right = (c * 256 + 8 + w + 2, y + 8 + h + 2), line_color = 'black', line_width = 1, fill_color = 'white')
-            fig = self.window[(self.name, "graph")].draw_image (data = self.cards_oi[n].thumbnail_bio, location = (c * 256 + 8, y + 8))
-            self.cards_oi[n].set_fig ((bg, fig))
-            c = 0 if (c + 1 == self.n_cols) else c + 1
+                bg  = self.window[(self.name, "graph")].draw_rectangle (top_left = (c * 256 + 6, y + 6),
+                                                                        bottom_right = (c * 256 + 8 + w + 2, y + 8 + h + 2),
+                                                                        line_color = 'black', line_width = 1,
+                                                                        fill_color = self.cards_oi[n].note.color)
+                fig = self.window[(self.name, "graph")].draw_image (data = self.cards_oi[n].thumbnail_bio, location = (c * 256 + 8, y + 8))
+                self.cards_oi[n].set_fig ((bg, fig))
+                c = 0 if (c + 1 == self.n_cols) else c + 1
 
-        self.window [self.name].widget.update ()
-        self.window [self.name].contents_changed ()
-        self.window [self.name].expand (expand_row = True)
+            self.window [self.name].widget.update ()
+            self.window [self.name].contents_changed ()
+            self.window [self.name].expand (expand_row = True)
+
+    def find_notes_from_fig (self, fig):
+        notes = []
+        for note in self.cards_oi:
+            if note.fig [1] in fig:
+                notes.append (note)
+        return notes
+
+    def delete_note (self, notes):
+        self.window [(self.name, 'graph')].selected_fig = None
+        for note in notes:
+            self.cards_oi.remove (note)
+            note.note.set_dirty (delete = True)
+        self.notebook.Sync ()
+        self.refresh_box ()
+        print ("Deleted note.")
+
+    def change_note_color (self, notes, color):
+        self.window [(self.name, 'graph')].selected_fig = None
+        for note in notes:
+            note.note.color = color
+            note.note.set_dirty ()
+            (x, y), (x_w, y_h) = self.window[(self.name, "graph")].get_bounding_box (note.fig[0])
+            self.window[(self.name, "graph")].delete_figure(note.fig[0])
+            bg  = self.window[(self.name, "graph")].draw_rectangle (top_left = (x, y),
+                                                                    bottom_right = (x_w, y_h),
+                                                                    line_color = 'black', line_width = 1,
+                                                                    fill_color = note.note.color)
+            self.window[(self.name, "graph")].send_figure_to_back (bg)
+            note.set_fig ((bg, note.fig[1]))
 
     def init (self, window, container_scroll_cb = None):
+        self.md = Markdown_Ext ([(0, 0, self.width)], {'color': (0,0,0,255), 'margin_bottom': 8})
         self.window = window
         self.container_scroll_cb = container_scroll_cb
         self.window[(self.name, 'graph')].widget.bind ('<MouseWheel>', self.scroll_handle)
@@ -202,6 +264,15 @@ def make_label_tree (label_tree = None):
 cardbox = CardBox (name = 'cardbox')
 
 def make_main_window (cal, label_tree = None, tags = None, notes = None):
+    with open ("assets/head.png", "rb") as ico:
+        win_ico = base64.b64encode(ico.read())
+    with open ("assets/refresh.png", "rb") as ico:
+        refresh_ico = base64.b64encode(ico.read())
+    with open ("assets/notes.png", "rb") as ico:
+        note_ico = base64.b64encode(ico.read())
+    with open ("assets/knowledge-graph.png", "rb") as ico:
+        graph_ico = base64.b64encode(ico.read())
+
     menu_def = [['&Notebook', ['&Open::menu', '---', 'E&xit::menu']],
                 ['&Edit', ['Copy (&C)::menu', 'Cut (&X)::menu', 'Paste (&V)::menu', '&Undo::menu', '&Redo::menu']],
                 ['T&ool', ['Settings::menu']],
@@ -241,19 +312,26 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
                         orientation = 'horizontal', expand_x = True, expand_y = True, key = '-PANE-', relief = 'groove', show_handle = False)
 
     main_layout =  [[sg.Menu (menu_def)]]
-    main_layout += [[sg.Button ('New Note'),
+    main_layout += [[sg.Button ('', image_source = note_ico, border_width = 1, image_subsample = 15,
+                                button_color = (sg.theme_background_color(), sg.theme_background_color ()),
+                                key = '-BTN-NOTE-'),
                      sg.Input (key = '-SEARCH-', expand_x = True,
                                default_text = 'Search query', do_not_clear = True),
-                     sg.Button ('Graph View'),
-                     sg.Button ('Refresh')]]
+                     sg.Button ('',image_source = graph_ico, border_width = 1, image_subsample = 15,
+                                button_color = (sg.theme_background_color(), sg.theme_background_color ()),
+                                key = '-BTN-GRAPH-'),
+                     sg.Button ('', image_source = refresh_ico, border_width = 1, image_subsample = 15,
+                                button_color = (sg.theme_background_color(), sg.theme_background_color ()),
+                                key = '-BTN-REFRESH-')]]
     main_layout += [[main_pane]]
-    main_layout += [[sg.Frame ("Info", layout = [[sg.Multiline (key = '-INFO-', expand_x = True, disabled = True, size = (None, 5), write_only = True, reroute_stdout = True, autoscroll = True)]], expand_x = True)]]
+    main_layout += [[sg.Frame ("Info", layout = [[sg.Multiline (key = '-INFO-', expand_x = True, disabled = True,
+                                                                size = (None, 5), write_only = True,
+                                                                reroute_stdout = True, autoscroll = True)]],
+                               expand_x = True)]]
 
-    with open ("assets/head.png", "rb") as ico:
-        s = base64.b64encode(ico.read())
     win = sg.Window('MD Note Manager', main_layout, finalize = True,
                     use_default_focus = True, grab_anywhere_using_control = True,
-                    resizable = True, use_ttk_buttons = True, ttk_theme = sg.DEFAULT_TTK_THEME, icon = s)
+                    resizable = True, use_ttk_buttons = True, ttk_theme = sg.DEFAULT_TTK_THEME, icon = win_ico)
     rwidth = win['-RIGHT_PANE-'].get_size()[0]
     lwidth = win['-LEFT_PANE-'].get_size()[0]
     win['-PANE-'].widget.paneconfig (win['-MIDDLE_PANE-'].widget, minsize = 272)
@@ -277,7 +355,10 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
 def update_show_labels (lbl_tree):
     if lbl_tree:
         tree_data = make_label_tree (lbl_tree)
+
+        old_vscroll = window ["-NESTED_LBL-"].widget.yview () [0]
         window ["-NESTED_LBL-"].update (values = tree_data)
+        window ["-NESTED_LBL-"].set_vscroll_position (old_vscroll)
 
 def update_show_tags (tags = None):
     if tags:
@@ -285,7 +366,9 @@ def update_show_tags (tags = None):
         for k in sorted(tags.keys()):
             values.append (f"{k} ({tags[k]})")
 
+        old_vscroll = window ["-TAGS-"].widget.yview () [0]
         window ["-TAGS-"].update (values = values)
+        window ["-TAGS-"].set_vscroll_position (old_vscroll)
 
 def create_gui (theme = default_theme, label_tree = None):
     global cal
@@ -362,7 +445,7 @@ def collect_tags_labels (values):
 
     return query
 
-def handle (setting_cb, open_cb):
+def handle (cb):
     event, values = window.read(10)
 
     #if event not in (None, sg.TIMEOUT_KEY, '__TIMER EVENT__'):
@@ -391,12 +474,27 @@ def handle (setting_cb, open_cb):
         window['-SEARCH-'].update (value = '')
 
     elif event == 'Settings::menu':
-        setting_cb ()
+        cb['settings'] ()
         return True
 
     elif event == 'Open::menu':
-        open_cb ()
+        cb['open'] ()
         return True
+
+    elif event == 'Delete::fig_menu':
+        cb['note'] (cmd = 'delete')
+        return True
+
+    elif event is not None and '::fig_color' in event:
+        cb['note'] (cmd = 'color', color = '#' + event.split('::fig_color')[1])
+        return True
+
+    elif event == '-BTN-REFRESH-':
+        cardbox.notebook.Refresh ()
+        cardbox.sync_cards       ()
+        cardbox.refresh_box      ()
+        update_show_tags         ()
+        update_show_labels       ()
 
     elif event in (None, sg.WINDOW_CLOSED, 'Exit'):
         return False

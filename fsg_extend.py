@@ -12,10 +12,14 @@ class Graph (sg.Graph):
     def _RightClickMenuCallback (self, event):
         #graph = self.Widget
         fig   = self.get_figures_at_location ((event.x, event.y))
+        #print (fig)
         if len(fig) == 0:
             self.set_right_click_menu (self.comm_right_click_menu)
         else:
             self.set_right_click_menu (self.fig_right_click_menu)
-            self.selected_fig = fig
+            if self.selected_fig is None:
+                self.selected_fig = fig
+            else:
+                self.selected_fig = self.selected_fig + fig
 
         super()._RightClickMenuCallback (event)
