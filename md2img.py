@@ -377,6 +377,7 @@ class Markdown_Ext (markdown.Markdown):
                 parts = text
             else:
                 parts = text.split(eliminate)
+                #print (parts)
             while end_index < len(parts):
                 w = 0
                 while end_index < len(parts):
@@ -393,6 +394,7 @@ class Markdown_Ext (markdown.Markdown):
                     end_index = start_index + 1
 
                 text_frag = eliminate.join(parts[start_index:end_index])
+                #print (text_frag)
                 draw = self.ensure_image(h)
 
                 self.line_height = max(h, self.line_height)

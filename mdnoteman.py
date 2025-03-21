@@ -92,7 +92,7 @@ if __name__ == "__main__":
     gui.update_show_tags     (Nb.tags)
     gui.update_show_labels   (Nb.labels)
 
-    gui.window.timer_start (200)
+    #gui.window.timer_start (200)
 
     cb = {'settings': call_settings,
           'open'    : call_open,
@@ -102,5 +102,5 @@ if __name__ == "__main__":
         pass
 
     clean_up ()
-    gui.window.timer_stop_all ()
+    #gui.window.timer_stop_all ()
     gui.window.close()

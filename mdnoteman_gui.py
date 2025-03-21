@@ -68,6 +68,7 @@ class CardBox:
     name     : str = ''
     width    : int = 768
     md       : Markdown_Ext = None
+    graph    : esg.Graph = None
 
     def get_note_by_timestamp (self, timestamp):
         for note in self.cards:
@@ -162,9 +163,11 @@ class CardBox:
 
     def erase (self):
         self.window[self.name].set_vscroll_position (0)
-        self.window[(self.name, "graph")].set_size ((self.width, 1))
-        self.window[(self.name, "graph")].change_coordinates ((0, 1), (self.width, 0))
-        self.window[(self.name, "graph")].erase()
+        size = self.window[self.name].get_size ()
+        h = size[1] - 10
+        self.graph.set_size ((self.width, h))
+        self.graph.change_coordinates ((0, h), (self.width, 0))
+        self.graph.erase()
 
     def resize (self, width):
         self.width = width
@@ -173,6 +176,34 @@ class CardBox:
 
         if self.n_cols != old_n_cols:
             self.refresh_box ()
+
+    def rearrange_box (self):
+        N = len (self.cards_oi)
+
+        c = 0
+        for n in range (N):
+            i = 1
+            y = 0
+            upper_n = n - i*self.n_cols
+            while (upper_n >= 0):
+                y += (self.cards_oi[upper_n].thumbnail.size[1] + 16)
+                i += 1
+                upper_n = n - i*self.n_cols
+
+            w,h = self.cards_oi[n].thumbnail.size
+            if y + 16 + h > self.graph.CanvasSize [1]:
+                self.graph.set_size ((self.width, y + 16 + h))
+                self.graph.change_coordinates ((0, y + 16 + h), (self.width, 0))
+
+            (ox1, oy1), (ox2, oy2) = self.graph.get_bounding_box (self.cards_oi[n].fig[0])
+            self.graph.move_figure (self.cards_oi[n].fig[0], c * 256 + 6 - ox1, y + 6 - oy1)
+            (ox1, oy1), (ox2, oy2) = self.graph.get_bounding_box (self.cards_oi[n].fig[1])
+            self.graph.move_figure (self.cards_oi[n].fig[1], c * 256 + 8 - ox1, y + 8 - oy1)
+            c = 0 if (c + 1 == self.n_cols) else c + 1
+
+        self.window [self.name].widget.update ()
+        self.window [self.name].contents_changed ()
+        self.window [self.name].expand (expand_row = True)
 
     def refresh_box (self):
         self.n_cols = self.width // 256
@@ -192,21 +223,71 @@ class CardBox:
                     upper_n = n - i*self.n_cols
 
                 w,h = self.cards_oi[n].thumbnail.size
-                if y + 16 + h > self.window[(self.name, "graph")].CanvasSize [1]:
-                    self.window[(self.name, "graph")].set_size ((self.width, y + 16 + h))
-                    self.window[(self.name, "graph")].change_coordinates ((0, y + 16 + h), (self.width, 0))
+                if y + 16 + h > self.graph.CanvasSize [1]:
+                    self.graph.set_size ((self.width, y + 16 + h))
+                    self.graph.change_coordinates ((0, y + 16 + h), (self.width, 0))
 
-                bg  = self.window[(self.name, "graph")].draw_rectangle (top_left = (c * 256 + 6, y + 6),
-                                                                        bottom_right = (c * 256 + 8 + w + 2, y + 8 + h + 2),
-                                                                        line_color = 'black', line_width = 1,
-                                                                        fill_color = self.cards_oi[n].note.color)
-                fig = self.window[(self.name, "graph")].draw_image (data = self.cards_oi[n].thumbnail_bio, location = (c * 256 + 8, y + 8))
+                bg  = self.graph.draw_rectangle (top_left = (c * 256 + 6, y + 6),
+                                                 bottom_right = (c * 256 + 8 + w + 2, y + 8 + h + 2),
+                                                 line_color = 'black', line_width = 1,
+                                                 fill_color = self.cards_oi[n].note.color)
+                fig = self.graph.draw_image (data = self.cards_oi[n].thumbnail_bio, location = (c * 256 + 8, y + 8))
                 self.cards_oi[n].set_fig ((bg, fig))
                 c = 0 if (c + 1 == self.n_cols) else c + 1
 
             self.window [self.name].widget.update ()
             self.window [self.name].contents_changed ()
             self.window [self.name].expand (expand_row = True)
+
+    def swap (self, fig1, fig2, always_refresh = False):
+        #print (f"{fig1} <-> {fig2}")
+        if fig1 != fig2:
+            fig1_found = fig2_found = False
+            fig1_idx = fig2_idx = 0
+
+            for i in range (len (self.cards_oi)):
+                if self.cards_oi[i].fig == fig1:
+                    fig1_idx = i
+                    fig1_found = True
+                    if fig1_found and fig2_found:
+                        break
+                    else:
+                        continue
+                if self.cards_oi[i].fig == fig2:
+                    fig2_idx = i
+                    fig2_found = True
+                    if fig1_found and fig2_found:
+                        break
+                    else:
+                        continue
+
+            if fig1_found and fig2_found:
+                note1_idx = self.cards_oi[fig1_idx].note.prefer_idx - 1
+                note2_idx = self.cards_oi[fig2_idx].note.prefer_idx - 1
+                #print (note1_idx)
+                #print (note2_idx)
+
+                # Swap in notebook
+                tmp_note = self.notebook.notes[note1_idx]
+                self.notebook.notes[note1_idx] = self.notebook.notes[note2_idx]
+                self.notebook.notes[note2_idx] = tmp_note
+                self.notebook.notes[note1_idx].set_dirty ()
+                self.notebook.notes[note2_idx].set_dirty ()
+                self.notebook.notes[note1_idx].prefer_idx = note1_idx + 1
+                self.notebook.notes[note2_idx].prefer_idx = note2_idx + 1
+
+                # Swpa in cardbox
+                tmp_note = self.cards_oi [fig1_idx]
+                self.cards_oi [fig1_idx] = self.cards_oi [fig2_idx]
+                self.cards_oi [fig2_idx] = tmp_note
+
+                # Refresh
+                if not always_refresh:
+                    self.rearrange_box ()
+
+        # Refresh
+        if always_refresh:
+            self.rearrange_box ()
 
     def find_notes_from_fig (self, fig):
         notes = []
@@ -229,20 +310,21 @@ class CardBox:
         for note in notes:
             note.note.color = color
             note.note.set_dirty ()
-            (x, y), (x_w, y_h) = self.window[(self.name, "graph")].get_bounding_box (note.fig[0])
-            self.window[(self.name, "graph")].delete_figure(note.fig[0])
-            bg  = self.window[(self.name, "graph")].draw_rectangle (top_left = (x, y),
-                                                                    bottom_right = (x_w, y_h),
-                                                                    line_color = 'black', line_width = 1,
-                                                                    fill_color = note.note.color)
-            self.window[(self.name, "graph")].send_figure_to_back (bg)
+            (x, y), (x_w, y_h) = self.graph.get_bounding_box (note.fig[0])
+            self.graph.delete_figure(note.fig[0])
+            bg  = self.graph.draw_rectangle (top_left = (x, y),
+                                             bottom_right = (x_w, y_h),
+                                             line_color = 'black', line_width = 1,
+                                             fill_color = note.note.color)
+            self.graph.send_figure_to_back (bg)
             note.set_fig ((bg, note.fig[1]))
 
     def init (self, window, container_scroll_cb = None):
-        self.md = Markdown_Ext ([(0, 0, self.width)], {'color': (0,0,0,255), 'margin_bottom': 8})
+        self.md = Markdown_Ext ([(0, 0, 240)], {'color': (0,0,0,255), 'margin_bottom': 8})
         self.window = window
+        self.graph = self.window[(self.name, "graph")]
         self.container_scroll_cb = container_scroll_cb
-        self.window[(self.name, 'graph')].widget.bind ('<MouseWheel>', self.scroll_handle)
+        self.graph.widget.bind ('<MouseWheel>', self.scroll_handle)
 
 def make_label_tree (label_tree = None):
     sg_lbl_tree = sg.TreeData ()
@@ -445,63 +527,121 @@ def collect_tags_labels (values):
 
     return query
 
+def check_resize_cardbox ():
+    # If cardbox was changed size, trigger refresh cardbox view
+    cardbox_width = window[cardbox.name].get_size ()[0]
+    if abs (cardbox_width - (cardbox.width + 15)) > 256:
+        window.write_event_value (cardbox.name, cardbox_width)
+
+dragging    = False
+start_point = None
+drag_fig    = None
+lastxy      = None
+snap_lastxy = None
+
 def handle (cb):
-    event, values = window.read(10)
+    global dragging, start_point, drag_fig, lastxy, snap_lastxy
+
+    event, values = window.read(100)
+    graph = window [(cardbox.name, "graph")]
 
     #if event not in (None, sg.TIMEOUT_KEY, '__TIMER EVENT__'):
     #    print (event)
     #    print (values)
 
-    if event in ('__TIMER EVENT__', ' Resize'):
-        # If cardbox was changed size, trigger refresh cardbox view
-        cardbox_width = window[cardbox.name].get_size ()[0]
-        if abs (cardbox_width - (cardbox.width + 15)) > 256:
-            window.write_event_value (cardbox.name, cardbox_width)
+    if event == ' Resize':
+        check_resize_cardbox ()
+        return True
 
-    elif event in ('-NESTED_LBL-', '-TAGS-'):
+    if event in ('-NESTED_LBL-', '-TAGS-'):
         window['-SEARCH-'].update (value = 'Search query')
         query = collect_tags_labels (values)
         #print (query)
         if query != '':
             cardbox.filter (query)
+        return True
 
-    elif event == '-SEARCH-':
+    if event == '-SEARCH-':
         #print (values["-SEARCH-"])
         window['-TAGS-'].update (set_to_index = None)
         cardbox.filter (values["-SEARCH-"])
+        return True
 
-    elif event == '-SEARCH-+INPUT FOCUS+':
+    if event == '-SEARCH-+INPUT FOCUS+':
         window['-SEARCH-'].update (value = '')
+        return True
 
-    elif event == 'Settings::menu':
+    if event == 'Settings::menu':
         cb['settings'] ()
         return True
 
-    elif event == 'Open::menu':
+    if event == 'Open::menu':
         cb['open'] ()
         return True
 
-    elif event == 'Delete::fig_menu':
+    if event == 'Delete::fig_menu':
         cb['note'] (cmd = 'delete')
         return True
 
-    elif event is not None and '::fig_color' in event:
+    if event is not None and '::fig_color' in event:
         cb['note'] (cmd = 'color', color = '#' + event.split('::fig_color')[1])
         return True
 
-    elif event == '-BTN-REFRESH-':
+    if event == '-BTN-REFRESH-':
         cardbox.notebook.Refresh ()
+        update_show_tags         (cardbox.notebook.tags)
+        update_show_labels       (cardbox.notebook.labels)
         cardbox.sync_cards       ()
         cardbox.refresh_box      ()
-        update_show_tags         ()
-        update_show_labels       ()
+        return True
 
-    elif event in (None, sg.WINDOW_CLOSED, 'Exit'):
+    if event == (cardbox.name, "graph"): # a mouse event on cardbox
+        x, y = values [event]
+        if not dragging:
+            drag_fig = graph.get_figures_at_location ((x,y))[-2:]
+            #print (drag_fig)
+            if len(drag_fig) > 0:
+                start_point = (x, y)
+                dragging = True
+                snap_lastxy = lastxy = x, y
+        else:
+            dx, dy = x - lastxy [0], y - lastxy [1]
+            snap_dx, snap_dy = x - snap_lastxy [0], y - snap_lastxy [1]
+            if abs(dx) > 2 or abs(dy) > 2:
+                for fig in drag_fig:
+                    graph.bring_figure_to_front (fig)
+                    graph.move_figure (fig, dx, dy)
+                graph.update ()
+                lastxy = x, y
+
+                if abs(snap_dx) > 10 or abs(snap_dy) > 10:
+                    dest_fig = graph.get_figures_at_location ((x,y))[:2]
+                    cardbox.swap (drag_fig, dest_fig)
+                    snap_lastxy = x, y
+
+        return True
+
+    if event == ((cardbox.name, 'graph'), '+UP'):
+        if dragging:
+            dest_fig = graph.get_figures_at_location (lastxy)[:2]
+            cardbox.swap (drag_fig, dest_fig, always_refresh = True)
+
+        dragging    = False
+        drag_fig    = None
+        start_point = None
+        lastxy      = None
+        snap_lastxy = None
+        return True
+
+    if event in (None, sg.WINDOW_CLOSED, 'Exit'):
         return False
 
     if event == cardbox.name:
         cardbox.resize (values ['cardbox'])
         return True
+
+    # Check periodically
+    check_resize_cardbox ()
 
     # Call sub-components's handles
     cal.handle (event, values)
