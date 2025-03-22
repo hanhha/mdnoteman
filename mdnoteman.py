@@ -44,7 +44,10 @@ def call_note (**kwargs):
     notes = gui.cardbox.find_notes_from_fig (gui.window[(gui.cardbox.name, 'graph')].selected_fig)
     #print (notes)
     if kwargs['cmd'] == 'color':
-        gui.cardbox.change_note_color (notes, kwargs['color'])
+        l = len (notes)
+        color = notes[0].note.color [1:] if l == 1 else None
+        new_color = gui.call_color_chooser_window (color = color, location = kwargs['location'])
+        gui.cardbox.change_note_color (notes, '#' + new_color)
         return True
     if kwargs['cmd'] == 'delete':
         gui.cardbox.delete_note (notes)
@@ -75,6 +78,9 @@ def call_settings ():
     cfg = gui.theme_change (cfg)
     save_config ()
 
+def call_new_note ():
+    note = gui.call_edit_window ()
+
 def clean_up ():
     global Nb
 
@@ -82,6 +88,10 @@ def clean_up ():
     Nb.Refresh ()
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        if sys.argv[1] == 'debug':
+            gui.debug = True
+
     #Nb.Create_random_notes (num = 10)
     if cfg['Notebook']['Path'] != '':
         Nb.Refresh ()
@@ -92,15 +102,13 @@ if __name__ == "__main__":
     gui.update_show_tags     (Nb.tags)
     gui.update_show_labels   (Nb.labels)
 
-    #gui.window.timer_start (200)
-
     cb = {'settings': call_settings,
           'open'    : call_open,
           'note'    : call_note,
+          'new_note': call_new_note,
           }
     while gui.handle (cb = cb):
         pass
 
     clean_up ()
-    #gui.window.timer_stop_all ()
-    gui.window.close()
+    gui.pop_nested_window (purge = True)

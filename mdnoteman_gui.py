@@ -19,9 +19,59 @@ import io
 import base64
 import mdnoteman_dsl as dsl
 
+debug = False
 default_theme = 'SystemDefault1'
 window        = None
+window_stack  = []
 cal           = Calendar (key_prefix = "Cal")
+
+assets = {}
+
+with open ("assets/head.png", "rb") as ico:
+    assets['win_ico'] = base64.b64encode(ico.read())
+with open ("assets/refresh.png", "rb") as ico:
+    assets['refresh_ico'] = base64.b64encode(ico.read())
+with open ("assets/notes.png", "rb") as ico:
+    assets['note_ico'] = base64.b64encode(ico.read())
+with open ("assets/knowledge-graph.png", "rb") as ico:
+    assets['graph_ico'] = base64.b64encode(ico.read())
+with open ("assets/trash-bin.png", "rb") as ico:
+    assets['trashbin_ico'] = base64.b64encode(ico.read())
+with open ("assets/building-plan.png", "rb") as ico:
+    assets['drawing_ico'] = base64.b64encode(ico.read())
+with open ("assets/color.png", "rb") as ico:
+    assets['color_ico'] = base64.b64encode(ico.read())
+with open ("assets/picture.png", "rb") as ico:
+    assets['picture_ico'] = base64.b64encode(ico.read())
+
+def push_nested_window (_win, modal = False):
+    global window_stack
+
+    window_stack.append ((_win, modal))
+    if modal:
+        window_stack[-1][0].TKroot.grab_set()
+
+def pop_nested_window (_win = None, purge = False):
+    global window_stack
+    
+    en = False
+
+    if _win is not None:
+        if _win == window_stack [-1][0]:
+            en = True
+    else:
+        en = True
+
+    if en:
+        win = window_stack.pop ()
+        if len(window_stack) > 0:
+            if window_stack[-1][1]:
+                window_stack[-1][0].TKroot.grab_set()
+
+        win[0].close ()
+
+    if purge and len(window_stack) > 0:
+        pop_nested_window (purge = True)
 
 @dataclass
 class NoteCard:
@@ -84,13 +134,7 @@ class CardBox:
     @property
     def layout (self):
         comm_menu = ["",["that","this","there",['Thing1','Thing2',"those"]]]
-        note_menu = ["",["Color", ['White::fig_colorFFFFFF',
-                                   'Pink::fig_colorFF69B4',
-                                   'Gray::fig_colorABABAB',
-                                   'Yellow::fig_colorFFFF00',
-                                   'Light Blue::fig_color87CEFA',
-                                   'Light Green::fig_color90EE90',
-                                   'Light Purple::fig_color9370DB'],
+        note_menu = ["",["Color::fig_color",
                          "Add label::fig_menu","Add tag::fig_menu", "Delete::fig_menu"]]
         _layout = [(esg.Graph (key = (self.name, "graph"),
                               canvas_size = (self.width, 1), graph_bottom_left = (0, 1), graph_top_right = (self.width, 0),
@@ -307,17 +351,19 @@ class CardBox:
 
     def change_note_color (self, notes, color):
         self.window [(self.name, 'graph')].selected_fig = None
-        for note in notes:
-            note.note.color = color
-            note.note.set_dirty ()
-            (x, y), (x_w, y_h) = self.graph.get_bounding_box (note.fig[0])
-            self.graph.delete_figure(note.fig[0])
-            bg  = self.graph.draw_rectangle (top_left = (x, y),
-                                             bottom_right = (x_w, y_h),
-                                             line_color = 'black', line_width = 1,
-                                             fill_color = note.note.color)
-            self.graph.send_figure_to_back (bg)
-            note.set_fig ((bg, note.fig[1]))
+        if color is not None:
+            for note in notes:
+                if color != note.note.color:
+                    note.note.color = color
+                    note.note.set_dirty ()
+                    (x, y), (x_w, y_h) = self.graph.get_bounding_box (note.fig[0])
+                    self.graph.delete_figure(note.fig[0])
+                    bg  = self.graph.draw_rectangle (top_left = (x, y),
+                                                     bottom_right = (x_w, y_h),
+                                                     line_color = 'black', line_width = 1,
+                                                     fill_color = note.note.color)
+                    self.graph.send_figure_to_back (bg)
+                    note.set_fig ((bg, note.fig[1]))
 
     def init (self, window, container_scroll_cb = None):
         self.md = Markdown_Ext ([(0, 0, 240)], {'color': (0,0,0,255), 'margin_bottom': 8})
@@ -346,14 +392,7 @@ def make_label_tree (label_tree = None):
 cardbox = CardBox (name = 'cardbox')
 
 def make_main_window (cal, label_tree = None, tags = None, notes = None):
-    with open ("assets/head.png", "rb") as ico:
-        win_ico = base64.b64encode(ico.read())
-    with open ("assets/refresh.png", "rb") as ico:
-        refresh_ico = base64.b64encode(ico.read())
-    with open ("assets/notes.png", "rb") as ico:
-        note_ico = base64.b64encode(ico.read())
-    with open ("assets/knowledge-graph.png", "rb") as ico:
-        graph_ico = base64.b64encode(ico.read())
+    global assets, debug
 
     menu_def = [['&Notebook', ['&Open::menu', '---', 'E&xit::menu']],
                 ['&Edit', ['Copy (&C)::menu', 'Cut (&X)::menu', 'Paste (&V)::menu', '&Undo::menu', '&Redo::menu']],
@@ -394,26 +433,29 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
                         orientation = 'horizontal', expand_x = True, expand_y = True, key = '-PANE-', relief = 'groove', show_handle = False)
 
     main_layout =  [[sg.Menu (menu_def)]]
-    main_layout += [[sg.Button ('', image_source = note_ico, border_width = 1, image_subsample = 15,
+    main_layout += [[sg.Button ('', image_source = assets['note_ico'], border_width = 1, image_subsample = 15,
                                 button_color = (sg.theme_background_color(), sg.theme_background_color ()),
                                 key = '-BTN-NOTE-'),
                      sg.Input (key = '-SEARCH-', expand_x = True,
                                default_text = 'Search query', do_not_clear = True),
-                     sg.Button ('',image_source = graph_ico, border_width = 1, image_subsample = 15,
+                     sg.Button ('',image_source = assets['graph_ico'], border_width = 1, image_subsample = 15,
                                 button_color = (sg.theme_background_color(), sg.theme_background_color ()),
                                 key = '-BTN-GRAPH-'),
-                     sg.Button ('', image_source = refresh_ico, border_width = 1, image_subsample = 15,
+                     sg.Button ('', image_source = assets['refresh_ico'], border_width = 1, image_subsample = 15,
                                 button_color = (sg.theme_background_color(), sg.theme_background_color ()),
                                 key = '-BTN-REFRESH-')]]
     main_layout += [[main_pane]]
     main_layout += [[sg.Frame ("Info", layout = [[sg.Multiline (key = '-INFO-', expand_x = True, disabled = True,
                                                                 size = (None, 5), write_only = True,
-                                                                reroute_stdout = True, autoscroll = True)]],
+                                                                reroute_stdout = not debug, autoscroll = True)]],
                                expand_x = True)]]
 
     win = sg.Window('MD Note Manager', main_layout, finalize = True,
                     use_default_focus = True, grab_anywhere_using_control = True,
-                    resizable = True, use_ttk_buttons = True, ttk_theme = sg.DEFAULT_TTK_THEME, icon = win_ico)
+                    resizable = True, use_ttk_buttons = True,
+                    ttk_theme = sg.DEFAULT_TTK_THEME, icon = assets['win_ico'])
+    push_nested_window (win, False)
+
     rwidth = win['-RIGHT_PANE-'].get_size()[0]
     lwidth = win['-LEFT_PANE-'].get_size()[0]
     win['-PANE-'].widget.paneconfig (win['-MIDDLE_PANE-'].widget, minsize = 272)
@@ -465,6 +507,135 @@ def create_gui (theme = default_theme, label_tree = None):
 
     return window
 
+def call_color_chooser_window (color = None, location = None):
+    global window_stack
+    global window
+
+    color_dict = {}
+    color_dict ['White']        = 'FFFFFF'
+    color_dict ['Pink']         = 'FF69B4'
+    color_dict ['Gray']         = 'ABABAB'
+    color_dict ['Yellow']       = 'FFFF00'
+    color_dict ['Light Blue']   = '87CEFA'
+    color_dict ['Light Green']  = '90EE90'
+    color_dict ['Light Purple'] = '9370DB'
+
+    prev = {}
+    prev ['FFFFFF'] = False
+    prev ['FF69B4'] = False
+    prev ['ABABAB'] = False
+    prev ['FFFF00'] = False
+    prev ['87CEFA'] = False
+    prev ['90EE90'] = False
+    prev ['9370DB'] = False
+
+    cb = []
+    for k,v in color_dict.items():
+        cb.append ([sg.Checkbox(k, key = v, background_color = '#' + v, expand_x = True)])
+
+    _win = sg.Window ('', layout = cb, modal = True,
+                      no_titlebar = True,
+                      keep_on_top = True, location = (location[0], location[1] - 32),
+                      finalize = True, icon = assets['win_ico'],
+                      resizable = False)
+    push_nested_window (_win, False)
+    _win.bind ('<FocusOut>', 'LostFocus')
+    _win.bind ('<ButtonRelease-1>', 'Release')
+
+    selected = color
+    if color is not None:
+        _win[color].update (value = True)
+        prev[color] = True
+
+    while True:
+        event, values = _win.read ()
+        #if event not in (None, sg.TIMEOUT_KEY, '__TIMER EVENT__'):
+        #    print (event)
+        #    print (values)
+
+        if event == 'Release':
+            for v in color_dict.values():
+                val = _win[v].get ()
+                if val != prev [v]:
+                    prev[v] = val
+                    _win.write_event_value (v, val)
+                    break
+
+        if event in prev.keys():
+            if values[event]:
+                for k in prev.keys():
+                    if k != event:
+                        _win[k].update (value = False)
+                selected = event
+                break
+
+        if event == 'LostFocus':
+            break
+
+    pop_nested_window (_win)
+    return selected
+
+def call_edit_window (note = None):
+    if note is not None:
+        ctn    = note.content
+        tags   = note.tags
+        labels = note.labels
+        links  = note.links
+        color  = note.color
+    else:
+        ctn    = 'Take a note in MD format ...'
+        tags   = []
+        labels = []
+        links  = []
+        color  = '#FFFFFF' # White
+
+    md_layout = [[sg.Multiline (key = '-EDT-NOTE-', expand_x = True, expand_y = True,
+                                default_text = ctn,
+                                do_not_clear = True)]]
+    preview_layout = [[]]
+    layout = [[sg.TabGroup([[sg.Tab('Markdown', md_layout, tooltip = 'Markdown format'),
+                             sg.Tab('Preview', preview_layout, tooltip = 'Preview')]], expand_x = True, expand_y = True)],
+              [sg.Button (key = '-BTN-COLOR-', border_width = 1, image_source = assets['color_ico'],
+                          button_color = (color, color),
+                          image_subsample = 15, tooltip = "Change background color of note"),
+               sg.Button ('Add labels'),
+               sg.Button ('Add tags'),
+               sg.Button (key = '-BTN-IMG-', border_width = 1, image_source = assets['picture_ico'],
+                          button_color = (sg.theme_background_color(), sg.theme_background_color ()),
+                          image_subsample = 16, tooltip = 'Add image to note'),
+               sg.Button (key = '-BTN-DWG-', border_width = 1, image_source = assets['drawing_ico'],
+                          button_color = (sg.theme_background_color(), sg.theme_background_color ()),
+                          image_subsample = 16, tooltip = 'Add drawing to note'),
+               sg.Push(),
+               sg.Button (key = '-BTN-DEL-', border_width = 1, image_source = assets['trashbin_ico'],
+                          button_color = (sg.theme_background_color(), sg.theme_background_color ()),
+                          image_subsample = 16, tooltip = 'Delete note')],
+              [sg.Frame ("Assets", layout = [
+                        [sg.Listbox(['nothing ...'], expand_x = True, key = '-EDT-ASSETS-')]
+                    ], expand_x = True)],
+              [sg.Push(), sg.Button ('Save & Close')]]
+
+    _win = sg.Window ('Edit note', layout, modal = True, finalize = True, resizable = True,
+                      icon = assets['win_ico'])
+    push_nested_window (_win, True)
+
+    while True: # Event Loop
+        event, values = _win.read()
+        if event not in (None, sg.TIMEOUT_KEY, '__TIMER EVENT__'):
+            print (event)
+            print (values)
+
+        if event in (sg.WIN_CLOSED, 'Exit'):
+            edit_note = note
+            break
+        if event == 'Save & Close':
+            edit_note = None
+            break
+
+    pop_nested_window (_win)
+        
+    return edit_note
+
 def make_theme_window (theme):
     sg.theme (theme)
 
@@ -472,14 +643,20 @@ def make_theme_window (theme):
               [sg.Listbox(values=sg.theme_list(), size=(20, 12), key='-LIST-', enable_events = True, select_mode = "LISTBOX_SELECT_MODE_SINGLE")],
               [sg.Button('OK'), sg.Button('Exit')]]
 
-    return sg.Window('Theme Browser', layout, modal = True, finalize = True)
+    _win = sg.Window('Theme Browser', layout, modal = True, finalize = True,
+                     icon = assets['win_ico'])
+    push_nested_window (_win, True)
+    return _win
 
 def theme_change (cfg):
+    global window
+
     old_theme = sg.theme ()
     new_theme = old_theme
     selected  = old_theme
 
     setting_window = make_theme_window (selected)
+
     list_of_themes = setting_window['-LIST-'].get_list_values ()
     selected_idx   = list_of_themes.index (selected)
     setting_window['-LIST-'].update (scroll_to_index = selected_idx, set_to_index = selected_idx)
@@ -490,7 +667,7 @@ def theme_change (cfg):
             selected_theme = values['-LIST-'][0]
             selected_idx   = setting_window['-LIST-'].get_indexes ()[0]
             if selected_theme != selected:
-                setting_window.close ()
+                pop_nested_window (setting_window)
                 selected = selected_theme
                 setting_window = make_theme_window (selected_theme)
                 setting_window['-LIST-'].update (scroll_to_index = selected_idx, set_to_index = selected_idx)
@@ -503,11 +680,12 @@ def theme_change (cfg):
             new_theme = selected_theme
             break
 
-    setting_window.close ()
+    pop_nested_window (setting_window)
+
     if new_theme != old_theme:
-        window.close ()
+        pop_nested_window (window)
         window = create_gui (new_theme)
-        cfg['Appearance']['Theme'] = new_theme
+        cfg['Appearance']['e'] = new_theme
 
     return cfg
 
@@ -583,8 +761,10 @@ def handle (cb):
         cb['note'] (cmd = 'delete')
         return True
 
-    if event is not None and '::fig_color' in event:
-        cb['note'] (cmd = 'color', color = '#' + event.split('::fig_color')[1])
+    if event == 'Color::fig_color':
+        root_location = (graph.widget.winfo_rootx(), graph.widget.winfo_rooty())
+        cb['note'] (cmd = 'color', location = (values[(cardbox.name, 'graph')][0] + root_location[0],
+                                               values[(cardbox.name, 'graph')][1] + root_location[1]))
         return True
 
     if event == '-BTN-REFRESH-':
@@ -593,6 +773,17 @@ def handle (cb):
         update_show_labels       (cardbox.notebook.labels)
         cardbox.sync_cards       ()
         cardbox.refresh_box      ()
+        return True
+
+    if event == '-BTN-NOTE-':
+        note = cb['new_note'] ()
+        print (note)
+        if note is not None:
+            update_show_tags         (cardbox.notebook.tags)
+            update_show_labels       (cardbox.notebook.labels)
+            cardbox.sync_cards       ()
+            cardbox.refresh_box      ()
+
         return True
 
     if event == (cardbox.name, "graph"): # a mouse event on cardbox

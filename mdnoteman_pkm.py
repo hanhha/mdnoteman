@@ -276,6 +276,8 @@ class Notebook:
                 if note.deleted:
                     self.remove_note (i, synced = delete_sync)
                     i += (1 if not delete_sync else 0)
+                    if delete_sync:
+                        l = len (self.notes)
                 else:
                     i += 1
 
@@ -297,12 +299,12 @@ class Notebook:
     def Refresh (self):
         file_records = self.Pull_From_Disk ()
         #print (file_records)
-        for note in self.notes:
-            print (note)
+        #for note in self.notes:
+        #    print (note)
         file_records = self.Sync (file_records, delete_sync = True)
-        for note in self.notes:
-            print (note)
-        print (file_records)
+        #for note in self.notes:
+        #    print (note)
+        #print (file_records)
         self.Push_To_Disk (file_records)
 
     def remove_note (self, idx, synced = False):
