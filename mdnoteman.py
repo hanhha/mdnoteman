@@ -42,17 +42,29 @@ def new_notebook (path):
 
 def call_note (**kwargs):
     notes = gui.cardbox.find_notes_from_fig (gui.window[(gui.cardbox.name, 'graph')].selected_fig)
+    gui.window[(gui.cardbox.name, 'graph')].selected_fig = None
+
     #print (notes)
     if kwargs['cmd'] == 'color':
         l = len (notes)
         color = notes[0].note.color [1:] if l == 1 else None
         new_color = gui.call_color_chooser_window (color = color, location = kwargs['location'])
-        gui.cardbox.change_note_color (notes, '#' + new_color)
+        gui.cardbox.change_note_color (notes, new_color)
         return True
+
     if kwargs['cmd'] == 'delete':
         gui.cardbox.delete_note (notes)
         gui.update_show_tags    (Nb.tags)
         gui.update_show_labels  (Nb.labels)
+        return True
+
+    if kwargs['cmd'] == 'tags':
+        l = len (notes)
+        tags          = gui.cardbox.notebook.tags
+        selected_tags = notes[0].note.tags
+        new_tags      = gui.call_tags_chooser_window ("Tag note", tags = tags, selected_tags = selected_tags,
+                                                      location = kwargs['location'], relax_list_order = True, row_limit = 8)
+        print (new_tags) #TODO
         return True
 
 def call_open ():
@@ -111,4 +123,3 @@ if __name__ == "__main__":
         pass
 
     clean_up ()
-    gui.pop_nested_window (purge = True)

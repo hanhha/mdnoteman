@@ -17,6 +17,7 @@ from typing import List, Dict, Set
 from PIL import Image, ImageDraw, ImageFont
 import io
 import base64
+import re
 import mdnoteman_dsl as dsl
 
 debug = False
@@ -51,7 +52,7 @@ def push_nested_window (_win, modal = False):
     if modal:
         window_stack[-1][0].TKroot.grab_set()
 
-def pop_nested_window (_win = None, purge = False):
+def pop_nested_window (_win = None):
     global window_stack
     
     en = False
@@ -69,9 +70,6 @@ def pop_nested_window (_win = None, purge = False):
                 window_stack[-1][0].TKroot.grab_set()
 
         win[0].close ()
-
-    if purge and len(window_stack) > 0:
-        pop_nested_window (purge = True)
 
 @dataclass
 class NoteCard:
@@ -135,7 +133,7 @@ class CardBox:
     def layout (self):
         comm_menu = ["",["that","this","there",['Thing1','Thing2',"those"]]]
         note_menu = ["",["Color::fig_color",
-                         "Add label::fig_menu","Add tag::fig_menu", "Delete::fig_menu"]]
+                         "Add labels::fig_menu","Add tags::fig_menu", "Delete::fig_menu"]]
         _layout = [(esg.Graph (key = (self.name, "graph"),
                               canvas_size = (self.width, 1), graph_bottom_left = (0, 1), graph_top_right = (self.width, 0),
                                expand_x = True, expand_y = True, enable_events = True, drag_submits = True,
@@ -341,7 +339,6 @@ class CardBox:
         return notes
 
     def delete_note (self, notes):
-        self.window [(self.name, 'graph')].selected_fig = None
         for note in notes:
             self.cards_oi.remove (note)
             note.note.set_dirty (delete = True)
@@ -350,11 +347,10 @@ class CardBox:
         print ("Deleted note.")
 
     def change_note_color (self, notes, color):
-        self.window [(self.name, 'graph')].selected_fig = None
         if color is not None:
             for note in notes:
                 if color != note.note.color:
-                    note.note.color = color
+                    note.note.color = '#' + color
                     note.note.set_dirty ()
                     (x, y), (x_w, y_h) = self.graph.get_bounding_box (note.fig[0])
                     self.graph.delete_figure(note.fig[0])
@@ -507,10 +503,131 @@ def create_gui (theme = default_theme, label_tree = None):
 
     return window
 
-def call_color_chooser_window (color = None, location = None):
-    global window_stack
-    global window
+def call_tags_chooser_window (title, tags, selected_tags, relax_list_order = False, location = None, row_limit = 8):
+    '''Create a floating window to select tags or labels
+        relax_list_order: selected tags will be shown first, then tags with high number of notes'''
 
+    prev_cb = []
+
+    # Reorder list
+    for k, v in tags.items():
+        k_selected = k in selected_tags
+        l = len(prev_cb)
+        if l > 0:
+            i = 0
+            while (i < l):
+                pk, pv = list(prev_cb[i].items())[0]
+                p_selected = pk in selected_tags
+                if relax_list_order:
+                    if not k_selected:
+                        if p_selected or (v < pv[0]):
+                            i += 1
+                        else:
+                            break
+                    if k_selected:
+                        if p_selected and (v < pv[0]):
+                            i += 1
+                        else:
+                            break
+                else:
+                    if k < pk: # in abc order of keys
+                        i += 1
+                    else:
+                        break
+            if i < l:
+                prev_cb.insert (i, {k : (v, k_selected)})
+            else:
+                prev_cb.append ({k : (v, k_selected)})
+        else:
+            prev_cb.append ({k : (v, k_selected)})
+
+    #print (f"len(tags) = {len(tags)} : len(prev_cb) = {len(prev_cb)}")
+
+    # Create list of Checkbox
+    sub_cb = []
+    cb     = []
+    i = 0
+    for tag_e in prev_cb:
+        tag, v = list(tag_e.items())[0]
+        if relax_list_order:
+            sub_cb.append ([sg.pin(sg.Checkbox(tag, key = tag, expand_x = True, default = tag in selected_tags),
+                                   shrink = True)])
+            if (i + 1 == row_limit):
+                cb.append (sg.Column(sub_cb))
+                sub_cb = []
+                i = 0
+            else:
+                i += 1
+        else:
+            cb.append ([sg.Checkbox(tag, key = tag, expand_x = True, default = tag in selected_tags)])
+    if relax_list_order and len(sub_cb) > 0:
+        cb.append (sg.vtop(sg.Column(sub_cb)))
+  
+    layout = [[sg.Text (title)],
+              [sg.Input (key = '-IN-', enable_events = True)],
+              cb]
+    _win = sg.Window ('', layout = layout, modal = True,
+                      no_titlebar = True,
+                      keep_on_top = True, location = (location[0], location[1] - 32),
+                      finalize = True, icon = assets['win_ico'],
+                      resizable = False)
+    push_nested_window (_win, False)
+    _win.bind ('<FocusOut>', 'LostFocus')
+    _win.bind ('<Escape>', 'ESC')
+    _win['-IN-'].bind('<Return>', 'Enter')
+    #_win['-IN-'].bind('<Escape>', 'ESC')
+
+    tags_inp = []
+    new_tags = selected_tags
+    input_txt = ''
+
+    while True:
+        event, values = _win.read ()
+        #if event not in (None, sg.TIMEOUT_KEY, '__TIMER EVENT__'):
+        #    print (event)
+        #    print (values)
+
+        if event == '-IN-':
+            [*inp, recent_inp] = re.split(r'[,\s]+', values['-IN-'].strip())
+            if values['-IN-'] == input_txt:
+                continue
+            else:
+                input_txt = values['-IN-']
+                [*inp, recent_inp] = re.split(r'[,\s]+', input_txt.strip())
+                if recent_inp != '':
+                    for tag in tags.keys():
+                        if not tag.startswith(recent_inp):
+                            _win[tag].update (visible = False)
+                else:
+                    for tag in tags.keys():
+                        _win[tag].update (visible = True)
+
+        if event == '-IN-Enter':
+            strip_inp = values['-IN-'].strip(', ')
+            tags_inp = re.split(r'[,\s]+', strip_inp) if (strip_inp != '') else []
+            break
+
+        if event == 'LostFocus':
+            if _win.find_element_with_focus() is None:
+                new_tags = []
+                for k in tags.keys():
+                    if values[k]:
+                        new_tags.append (k)
+                break
+
+        if event == 'ESC':
+            new_tags = []
+            for k in tags.keys():
+                if values[k]:
+                    new_tags.append (k)
+            break
+
+    pop_nested_window (_win)
+
+    new_tags.extend (tags_inp)
+    return list(set(new_tags)) 
+
+def call_color_chooser_window (color = None, location = None):
     color_dict = {}
     color_dict ['White']        = 'FFFFFF'
     color_dict ['Pink']         = 'FF69B4'
@@ -541,6 +658,7 @@ def call_color_chooser_window (color = None, location = None):
     push_nested_window (_win, False)
     _win.bind ('<FocusOut>', 'LostFocus')
     _win.bind ('<ButtonRelease-1>', 'Release')
+    _win.bind ('<Escape>', 'ESC')
 
     selected = color
     if color is not None:
@@ -569,7 +687,7 @@ def call_color_chooser_window (color = None, location = None):
                 selected = event
                 break
 
-        if event == 'LostFocus':
+        if event in ('ESC', 'LostFocus'):
             break
 
     pop_nested_window (_win)
@@ -619,13 +737,15 @@ def call_edit_window (note = None):
                       icon = assets['win_ico'])
     push_nested_window (_win, True)
 
+    _win.bind ('<Escape>', 'ESC')
+
     while True: # Event Loop
         event, values = _win.read()
-        if event not in (None, sg.TIMEOUT_KEY, '__TIMER EVENT__'):
-            print (event)
-            print (values)
+        #if event not in (None, sg.TIMEOUT_KEY, '__TIMER EVENT__'):
+        #    print (event)
+        #    print (values)
 
-        if event in (sg.WIN_CLOSED, 'Exit'):
+        if event in (sg.WIN_CLOSED, 'Exit', 'ESC'):
             edit_note = note
             break
         if event == 'Save & Close':
@@ -761,6 +881,12 @@ def handle (cb):
         cb['note'] (cmd = 'delete')
         return True
 
+    if event == 'Add tags::fig_menu':
+        root_location = (graph.widget.winfo_rootx(), graph.widget.winfo_rooty())
+        cb['note'] (cmd = 'tags', location = (values[(cardbox.name, 'graph')][0] + root_location[0],
+                                              values[(cardbox.name, 'graph')][1] + root_location[1]))
+        return True
+
     if event == 'Color::fig_color':
         root_location = (graph.widget.winfo_rootx(), graph.widget.winfo_rooty())
         cb['note'] (cmd = 'color', location = (values[(cardbox.name, 'graph')][0] + root_location[0],
@@ -777,7 +903,7 @@ def handle (cb):
 
     if event == '-BTN-NOTE-':
         note = cb['new_note'] ()
-        print (note)
+        #print (note)
         if note is not None:
             update_show_tags         (cardbox.notebook.tags)
             update_show_labels       (cardbox.notebook.labels)
