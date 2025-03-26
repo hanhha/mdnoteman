@@ -20,7 +20,7 @@ def parse_note_file (path, upd_records = None):
     timestamp     = 0
     new_timestamp = 0
     content       = ''
-    color         = 'white'
+    color         = '#FFFFFF'
     tags          = []
     labels        = []
     links         = []
@@ -90,7 +90,7 @@ def parse_note_file (path, upd_records = None):
                     timestamp          = new_timestamp
                 else:
                     timestamp = int(line.strip()[2:-1])
-                    continue
+                continue
 
             if not is_tags_read:
                 if tag_re.match(line):
@@ -183,7 +183,7 @@ class Note:
     def simple_context (self):
         _content = "---\n\n"
         _content += f"{' '.join(['\\#' + tag for tag in self.tags])}\n\n"
-        _content += f"{'\n\n'.join(['@' + lbl for lbl in self.labels])}"
+        _content += f"{' '.join(['@' + lbl for lbl in self.labels])}"
         return _content
 
     @property
@@ -197,6 +197,15 @@ class Note:
     def dict (self):
         return {'timestamp': self.timestamp, 'tags': self.tags.copy(), 'labels': self.labels.copy(),
                 'content': self.content, 'links': self.links.copy(), 'color': self.color, 'prefer_idx': self.prefer_idx}
+
+    def set (self, note_info, set_dirty = False):
+        if isinstance (note_info, dict):
+            for k in note_info:
+                setattr (self, k, note_info [k])
+        else:
+            self.set (note_info.dict)
+        if set_dirty:
+            self.set_dirty ()
 
     def set_dirty (self, delete = False):
         self.dirty   = True
@@ -219,6 +228,19 @@ class Notebook:
     #                                                  'C': {'count' : 3, 'children': {}}})
     path   : str  = None
     notes  : List[Note] = field (default_factory = lambda: [])
+
+    @property
+    def labels_flatten (self):
+        def travel_labels (prefix, lbl_dict):
+            lbls = {}
+            for k, v in lbl_dict.items():
+                prefix_k = prefix + k 
+                lbls [prefix_k] = v ['count']
+                if v['children']:
+                    lbls = lbls | travel_labels (prefix_k + '/', v['children'])
+            return lbls
+
+        return travel_labels ('', self.labels)
 
     def Pull_From_Disk (self):
         '''Fetch notes from disk, override note by version on disk if it was not modified in app
@@ -274,7 +296,7 @@ class Notebook:
                 file_hndl [filename][note.timestamp] = (note.dict, not note.deleted)
 
                 if note.deleted:
-                    self.remove_note (i, synced = delete_sync)
+                    self.remove_note (i, delete = delete_sync)
                     i += (1 if not delete_sync else 0)
                     if delete_sync:
                         l = len (self.notes)
@@ -307,8 +329,8 @@ class Notebook:
         #print (file_records)
         self.Push_To_Disk (file_records)
 
-    def remove_note (self, idx, synced = False):
-        if synced:
+    def remove_note (self, idx, delete = False):
+        if delete:
             note = self.notes.pop (idx)
         else:
             note = self.notes [idx]
@@ -323,6 +345,8 @@ class Notebook:
             lbls = lbl.split ('/')
             self.remove_lbl (self.labels, lbls)
 
+        return note
+
     def find_note (self, timestamp):
         for i in range(len(self.notes)):
             if self.notes[i].timestamp == timestamp:
@@ -330,11 +354,14 @@ class Notebook:
         return None
 
     def remove_lbl (self, lbl_dict, lbl):
-        if lbl[0] in lbl_dict:
+        #print (lbl)
+        if lbl [0] in lbl_dict:
             if lbl_dict[lbl[0]]['count'] > 0:
                 lbl_dict[lbl[0]]['count'] -= 1
-        if len (lbl) > 1:
-            self.remove_lbl (lbl_dict[lbl[0]]['children'], lbl [1:])
+                if len (lbl) > 1:
+                    self.remove_lbl (lbl_dict[lbl[0]]['children'], lbl [1:])
+            else:
+                del (lbl_dict[lbl[0]])
 
     def add_lbl (self, lbl_dict, lbl):
         if lbl[0] not in lbl_dict:
@@ -344,15 +371,22 @@ class Notebook:
         if len (lbl) > 1:
             self.add_lbl (lbl_dict[lbl[0]]['children'], lbl [1:])
 
-    def update_note (self, idx, note_info):
+    def update_note (self, note_or_idx, note_info, set_dirty = False):
         if isinstance (note_info, Note):
             rec = note_info.dict
         else:
             rec = note_info
 
-        self.remove_note (idx, synced = False)
+        if isinstance (note_or_idx, Note):
+            idx = self.notes.index (note_or_idx)
+        else:
+            idx = note_or_idx
+
+        self.remove_note (idx, delete = False)
 
         note = self.notes [idx]
+        note.set (rec, set_dirty = set_dirty)
+
         for t in note.tags:
             if t not in self.tags:
                 self.tags [t] = 1
@@ -364,12 +398,8 @@ class Notebook:
             self.add_lbl (self.labels, lbl)
 
     def add_note (self, note_info):
-        if isinstance (note_info, dict):
-            note = Note ()
-            for k in note_info:
-                setattr (note, k, note_info [k])
-        else:
-            note = note_info
+        note = Note ()
+        note.set (note_info)
 
         if note.prefer_idx == 0: # undefined
             self.notes.append (note)

@@ -19,6 +19,7 @@ import io
 import base64
 import re
 import mdnoteman_dsl as dsl
+from copy import copy
 
 debug = False
 default_theme = 'SystemDefault1'
@@ -182,17 +183,18 @@ class CardBox:
         self.notebook = nb
         self.sync_cards ()
 
-    def sync_cards (self):
+    def sync_cards (self, dirty_only = False):
         print ("Syncing cards to box ...")
 
         for note in self.notebook.notes:
-            card = NoteCard(note = note)
-            card.init (self.md)
-            self.add_or_replace (card)
+            if (not dirty_only) or (note.dirty):
+                card = NoteCard(note = note)
+                card.init (self.md)
+                self.add_or_replace (card)
 
         self.filter ()
 
-        print ("Done.")
+        print ("Sync notes to cardbox done.")
 
     def add_or_replace (self, card):
         for i in range(len(self.cards)):
@@ -347,19 +349,47 @@ class CardBox:
         print ("Deleted note.")
 
     def change_note_color (self, notes, color):
+        for note in notes:
+            if color != note.note.color:
+                note.note.color = '#' + color
+                note.note.set_dirty ()
+                (x, y), (x_w, y_h) = self.graph.get_bounding_box (note.fig[0])
+                self.graph.delete_figure(note.fig[0])
+                bg  = self.graph.draw_rectangle (top_left = (x, y),
+                                                 bottom_right = (x_w, y_h),
+                                                 line_color = 'black', line_width = 1,
+                                                 fill_color = note.note.color)
+                self.graph.send_figure_to_back (bg)
+                note.set_fig ((bg, note.fig[1]))
+
+    def change_note_tags (self, notes, tags):
+        for note in notes:
+            new_note = copy(note.note)
+            new_note.tags = tags
+            self.notebook.update_note (note.note, new_note, True)
+        print ("Updated tags.")
+
+    def change_note_labels (self, notes, labels):
+        for note in notes:
+            new_note = copy(note.note)
+            new_note.labels = labels
+            self.notebook.update_note (note.note, new_note, True)
+        print ("Updated labels.")
+
+    def update_note (self, notes, color = None, tags = None, labels = None, delete = False):
+        if delete:
+            self.delete_note (notes)
+            return
         if color is not None:
-            for note in notes:
-                if color != note.note.color:
-                    note.note.color = '#' + color
-                    note.note.set_dirty ()
-                    (x, y), (x_w, y_h) = self.graph.get_bounding_box (note.fig[0])
-                    self.graph.delete_figure(note.fig[0])
-                    bg  = self.graph.draw_rectangle (top_left = (x, y),
-                                                     bottom_right = (x_w, y_h),
-                                                     line_color = 'black', line_width = 1,
-                                                     fill_color = note.note.color)
-                    self.graph.send_figure_to_back (bg)
-                    note.set_fig ((bg, note.fig[1]))
+            self.change_note_color (notes, color)
+        if tags is not None:
+            self.change_note_tags (notes, tags)
+            self.sync_cards  (dirty_only = True)
+            self.refresh_box ()
+        if labels is not None:
+            self.change_note_labels (notes, labels)
+            self.sync_cards  (dirty_only = True)
+            self.refresh_box ()
 
     def init (self, window, container_scroll_cb = None):
         self.md = Markdown_Ext ([(0, 0, 240)], {'color': (0,0,0,255), 'margin_bottom': 8})
@@ -559,7 +589,8 @@ def call_tags_chooser_window (title, tags, selected_tags, relax_list_order = Fal
             else:
                 i += 1
         else:
-            cb.append ([sg.Checkbox(tag, key = tag, expand_x = True, default = tag in selected_tags)])
+            cb.append ([sg.pin(sg.Checkbox(tag, key = tag, expand_x = True, default = tag in selected_tags),
+                               shrink = True)])
     if relax_list_order and len(sub_cb) > 0:
         cb.append (sg.vtop(sg.Column(sub_cb)))
   
@@ -575,10 +606,12 @@ def call_tags_chooser_window (title, tags, selected_tags, relax_list_order = Fal
     _win.bind ('<FocusOut>', 'LostFocus')
     _win.bind ('<Escape>', 'ESC')
     _win['-IN-'].bind('<Return>', 'Enter')
-    #_win['-IN-'].bind('<Escape>', 'ESC')
 
     tags_inp = []
-    new_tags = selected_tags
+    if isinstance (selected_tags, list):
+        new_tags = selected_tags
+    else:
+        new_tags = list(selected_tags)
     input_txt = ''
 
     while True:
@@ -605,6 +638,10 @@ def call_tags_chooser_window (title, tags, selected_tags, relax_list_order = Fal
         if event == '-IN-Enter':
             strip_inp = values['-IN-'].strip(', ')
             tags_inp = re.split(r'[,\s]+', strip_inp) if (strip_inp != '') else []
+            new_tags = []
+            for k in tags.keys():
+                if values[k]:
+                    new_tags.append (k)
             break
 
         if event == 'LostFocus':
@@ -625,7 +662,7 @@ def call_tags_chooser_window (title, tags, selected_tags, relax_list_order = Fal
     pop_nested_window (_win)
 
     new_tags.extend (tags_inp)
-    return list(set(new_tags)) 
+    return set(new_tags) if set(new_tags) != set(selected_tags) else None 
 
 def call_color_chooser_window (color = None, location = None):
     color_dict = {}
@@ -744,6 +781,7 @@ def call_edit_window (note = None):
         #if event not in (None, sg.TIMEOUT_KEY, '__TIMER EVENT__'):
         #    print (event)
         #    print (values)
+        #    TODO
 
         if event in (sg.WIN_CLOSED, 'Exit', 'ESC'):
             edit_note = note
@@ -887,6 +925,12 @@ def handle (cb):
                                               values[(cardbox.name, 'graph')][1] + root_location[1]))
         return True
 
+    if event == 'Add labels::fig_menu':
+        root_location = (graph.widget.winfo_rootx(), graph.widget.winfo_rooty())
+        cb['note'] (cmd = 'labels', location = (values[(cardbox.name, 'graph')][0] + root_location[0],
+                                              values[(cardbox.name, 'graph')][1] + root_location[1]))
+        return True
+
     if event == 'Color::fig_color':
         root_location = (graph.widget.winfo_rootx(), graph.widget.winfo_rooty())
         cb['note'] (cmd = 'color', location = (values[(cardbox.name, 'graph')][0] + root_location[0],
@@ -905,10 +949,11 @@ def handle (cb):
         note = cb['new_note'] ()
         #print (note)
         if note is not None:
-            update_show_tags         (cardbox.notebook.tags)
-            update_show_labels       (cardbox.notebook.labels)
-            cardbox.sync_cards       ()
-            cardbox.refresh_box      ()
+            cardbox.notebook.add_note (note)
+            cardbox.sync_cards  (dirty_only = True)
+            cardbox.refresh_box ()
+            update_show_tags    (cardbox.notebook.tags)
+            update_show_labels  (cardbox.notebook.labels)
 
         return True
 
