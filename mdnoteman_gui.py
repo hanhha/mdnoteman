@@ -442,7 +442,7 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
                                      auto_size_columns = True,
                                      select_mode = sg.TABLE_SELECT_MODE_EXTENDED,
                                      click_toggles_select = True,
-                                     num_rows = 20,
+                                     num_rows = 10,
                                      key = '-NESTED_LBL-',
                                      show_expanded = False,
                                      enable_events = True,
@@ -479,7 +479,7 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
                                 key = '-BTN-REFRESH-')]]
     main_layout += [[main_pane]]
     main_layout += [[sg.Frame ("Info", layout = [[sg.Multiline (key = '-INFO-', expand_x = True, disabled = True,
-                                                                size = (None, 5), write_only = True,
+                                                                size = (None, 2), write_only = True,
                                                                 reroute_stdout = not debug, autoscroll = True)]],
                                expand_x = True)]]
 
@@ -494,7 +494,7 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
     win['-PANE-'].widget.paneconfig (win['-MIDDLE_PANE-'].widget, minsize = 272)
     win['-PANE-'].widget.paneconfig (win['-RIGHT_PANE-'].widget, minsize = rwidth)
     win['-PANE-'].widget.paneconfig (win['-LEFT_PANE-'].widget, minsize = lwidth)
-    win.set_min_size ((lwidth + rwidth + 280, 200))
+    win.set_min_size ((lwidth + rwidth + 280, 480))
 
     #win.bind ("<ButtonPress-1>", ' Press')
     #win.bind ("<ButtonRelease-1>", ' Release')

@@ -79,7 +79,9 @@ class Node():
         return True
 
     def __str__ (self, indent = '  '):
-        return f"{self.type}: {self.value}\n{indent}{('\n' + indent).join([c.__str__() for c in self._children])}"
+        str_ = f"{self.type}: {self.value}" + '\n'
+        str_ += f"{indent}" + ('\n' + indent).join([c.__str__() for c in self._children])
+        return str_
 
     def reduce (self):
         i = 0
@@ -129,7 +131,9 @@ class NotNode (Node):
             return False
 
     def __str__ (self, indent = '  '):
-        return f"{self.type}\n{indent}{('\n'+indent).join([c.__str__(indent + '  ') for c in self._children])}"
+        str_ = self.type + '\n'
+        str_ += indent + ('\n'+indent).join([c.__str__(indent + '  ') for c in self._children])
+        return str_
 
 class OrNode (Node):
     def __init__ (self, value = False, children = None):
@@ -147,7 +151,9 @@ class OrNode (Node):
         return self._value
 
     def __str__ (self, indent = '  '):
-        return f"{self.type}\n{indent}{('\n'+indent).join([c.__str__(indent + '  ') for c in self._children])}"
+        str_ = self.type + '\n'
+        str_ += indent + ('\n'+indent).join([c.__str__(indent + '  ') for c in self._children])
+        return str_
 
 class AndNode (Node):
     def __init__ (self, value = False, children = None):
@@ -165,7 +171,9 @@ class AndNode (Node):
         return self._value
 
     def __str__ (self, indent = '  '):
-        return f"{self.type}\n{indent}{('\n'+indent).join([c.__str__(indent + '  ') for c in self._children])}"
+        str_ = self.type + '\n'
+        str_ += indent + ('\n'+indent).join([c.__str__(indent + '  ') for c in self._children])
+        return str_
 
 class EqlNode (Node):
     def __init__ (self, children = None):

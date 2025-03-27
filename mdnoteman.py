@@ -24,12 +24,11 @@ dflt_cfg['Appearance'] = {'Theme': 'SystemDefault1'}
 dflt_cfg['Notebook'] = {'Path': ''}
 
 if sys.platform == 'linux':
-    font_path = '' # TODO
+    font_path = str(Path.home()) + "/.local/share/fonts"
 elif sys.platform == 'darwin':
-    font_path = str(Path.home()) + "/Library/Fonts/"
-elif sys.platform == 'win32':
-    font_path = '' # TODO
+    font_path = str(Path.home()) + "/Library/Fonts"
 else:
+    print ("Unsupported platform")
     font_path = '' # TODO
 
 dflt_cfg['Fonts'] = {'Bold':   font_path + "/FreeSansBold.otf"

@@ -182,8 +182,8 @@ class Note:
     @property
     def simple_context (self):
         _content = "---\n\n"
-        _content += f"{' '.join(['\\#' + tag for tag in self.tags])}\n\n"
-        _content += f"{' '.join(['@' + lbl for lbl in self.labels])}"
+        _content += ' '.join(['#' + tag for tag in self.tags]) + "\n\n"
+        _content += ' '.join(['@' + lbl for lbl in self.labels])
         return _content
 
     @property
