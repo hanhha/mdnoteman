@@ -18,9 +18,37 @@ cfg = configparser.ConfigParser ()
 cfg_file = Path(cfgfile_str)
 if cfg_file.exists() and cfg_file.is_file():
     cfg.read (cfgfile_str)
+
+dflt_cfg = {}
+dflt_cfg['Appearance'] = {'Theme': 'SystemDefault1'}
+dflt_cfg['Notebook'] = {'Path': ''}
+
+if sys.platform == 'linux':
+    font_path = '' # TODO
+elif sys.platform == 'darwin':
+    font_path = str(Path.home()) + "/Library/Fonts/"
+elif sys.platform == 'win32':
+    font_path = '' # TODO
 else:
-    cfg['Appearance'] = {'Theme': 'SystemDefault1'}
-    cfg['Notebook'] = {'Path': ''}
+    font_path = '' # TODO
+
+dflt_cfg['Fonts'] = {'Bold':   font_path + "/FreeSansBold.otf"
+                    ,'Code':   font_path + "/FreeMono.otf"
+                    ,'Dflt':   font_path + "/FreeSans.otf"
+                    ,'Italic': font_path + "/FreeSansOblique.otf"
+                    ,'Code_size' : 14
+                    ,'Size':   12}
+
+def add_dict (a, b):
+    for k in b:
+        if k not in a:
+            a [k] = b [k]
+        else:
+            if b [k] is dict:
+                a [k] = add_dict (a [k], b [k])
+    return a
+
+cfg = add_dict (cfg, dflt_cfg)
 
 default_theme = cfg ['Appearance']['Theme']
 
@@ -119,7 +147,7 @@ if __name__ == "__main__":
     if cfg['Notebook']['Path'] != '':
         Nb.Refresh ()
 
-    gui.window = create_gui (default_theme)
+    gui.window = create_gui (cfg)
 
     gui.cardbox.set_notebook (Nb)
     gui.update_show_tags     (Nb.tags)

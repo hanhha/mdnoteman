@@ -8,11 +8,8 @@ from PIL import Image, ImageDraw, ImageFont
 from functools import reduce
 from pathlib import Path
 
-home = Path.home()
-
 BULLET_DIAMETER = 4
 IMAGE_BLOCK_HEIGHT = 1000
-font_dir = str(Path.home ()) + "/Library/Fonts/"
 
 class Markdown_Ext (markdown.Markdown):
     """
@@ -45,17 +42,17 @@ class Markdown_Ext (markdown.Markdown):
         self.init ()
 
         self.config = {
-            "bold_font_path": font_dir + "FreeSansBold.otf",
+            "bold_font_path": "Please config",
             "blockquote_indent": 16,
             "code_indent": 16,
-            "code_font_path": font_dir + "FreeMono.otf",
+            "code_font_path": "Please config",
             "code_font_size": 14,
             "color": (255, 255, 255, 255),
-            "default_font_path": font_dir + "FreeSans.otf",
+            "default_font_path": "Please config",
             "font_size": 12,
             "hr_color": (220, 220, 220, 255),
             "hr_padding": 0,
-            "italics_font_path": font_dir + "FreeSansOblique.otf",
+            "italics_font_path": "Please config",
             "link_color": (100, 100, 255, 255),
             "list_indent": 28,
             "list_item_margin_bottom": 4,

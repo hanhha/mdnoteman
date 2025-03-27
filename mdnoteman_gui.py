@@ -22,7 +22,6 @@ import mdnoteman_dsl as dsl
 from copy import copy
 
 debug = False
-default_theme = 'SystemDefault1'
 window        = None
 window_stack  = []
 cal           = Calendar (key_prefix = "Cal")
@@ -391,8 +390,16 @@ class CardBox:
             self.sync_cards  (dirty_only = True)
             self.refresh_box ()
 
-    def init (self, window, container_scroll_cb = None):
-        self.md = Markdown_Ext ([(0, 0, 240)], {'color': (0,0,0,255), 'margin_bottom': 8})
+    def init (self, window, cfg, container_scroll_cb = None):
+        config = {'color': (0,0,0,255), 'margin_bottom': 8,
+                  'bold_font_path' : cfg['Fonts']['Bold'],
+                  'code_font_path' : cfg['Fonts']['Code'],
+                  'code_font_size' : int(cfg['Fonts']['Code_size']),
+                  'default_font_path': cfg['Fonts']['Dflt'],
+                  'italics_font_path': cfg['Fonts']['Italic'],
+                  'font_size': int(cfg['Fonts']['Size'])}
+
+        self.md = Markdown_Ext ([(0, 0, 240)], config)
         self.window = window
         self.graph = self.window[(self.name, "graph")]
         self.container_scroll_cb = container_scroll_cb
@@ -520,16 +527,18 @@ def update_show_tags (tags = None):
         window ["-TAGS-"].update (values = values)
         window ["-TAGS-"].set_vscroll_position (old_vscroll)
 
-def create_gui (theme = default_theme, label_tree = None):
+def create_gui (cfg, label_tree = None):
     global cal
     global cardbox
+
+    theme = cfg ['Appearance']['Theme']
 
     sg.theme(theme)
     font = ("default", 15, 'normal')
     sg.set_options(font=font)
     window = make_main_window (cal, label_tree = label_tree)
     cal.init_cal (window)
-    cardbox.init (window, window[cardbox.name].TKColFrame.yscroll)
+    cardbox.init (window = window, container_scroll_cb = window[cardbox.name].TKColFrame.yscroll, cfg = cfg)
 
     return window
 
