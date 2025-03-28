@@ -45,6 +45,12 @@ with open ("assets/color.png", "rb") as ico:
 with open ("assets/picture.png", "rb") as ico:
     assets['picture_ico'] = base64.b64encode(ico.read())
 
+def flush_events ():
+    global window_stack
+
+    if len(window_stack) > 0:
+        window_stack[-1][0].read ()
+
 def push_nested_window (_win, modal = False):
     global window_stack
 
@@ -70,6 +76,8 @@ def pop_nested_window (_win = None):
                 window_stack[-1][0].TKroot.grab_set()
 
         win[0].close ()
+        if len(window_stack) > 0:
+            window_stack[-1][0].read () # Flush event read before back to previous window
 
 @dataclass
 class NoteCard:
@@ -282,8 +290,15 @@ class CardBox:
             self.window [self.name].contents_changed ()
             self.window [self.name].expand (expand_row = True)
 
+    def find_note_at_fig (self, fig):
+        for card in self.cards_oi:
+            if card.fig == fig:
+                return card.note
+        return None
+
     def swap (self, fig1, fig2, always_refresh = False):
         #print (f"{fig1} <-> {fig2}")
+
         if fig1 != fig2:
             fig1_found = fig2_found = False
             fig1_idx = fig2_idx = 0
@@ -501,6 +516,7 @@ def make_main_window (cal, label_tree = None, tags = None, notes = None):
     win.bind ("<Configure>", ' Resize')
     win['-SEARCH-'].bind ("<Return>", "")
     win['-SEARCH-'].bind ('<FocusIn>', '+INPUT FOCUS+')
+    win['-SEARCH-'].bind ('<FocusOut>', '-INPUT FOCUS-')
     #win['-PANE-'].bind ("<B1-Motion>", ' Drag')
     #win['-NESTED_LBL-'].bind ("<ButtonPress-1>", ' Press')
     #win['-NESTED_LBL-'].bind ("<ButtonRelease-1>", ' Release')
@@ -780,20 +796,35 @@ def call_edit_window (note = None):
               [sg.Push(), sg.Button ('Save & Close')]]
 
     _win = sg.Window ('Edit note', layout, modal = True, finalize = True, resizable = True,
-                      icon = assets['win_ico'])
+                      icon = assets['win_ico'], keep_on_top = True)
     push_nested_window (_win, True)
 
     _win.bind ('<Escape>', 'ESC')
+    _win['-EDT-NOTE-'].bind ('<FocusIn>', '+INPUT FOCUS+')
+    _win['-EDT-NOTE-'].bind ('<FocusOut>', '-INPUT FOCUS-')
+
+    ctn_edited = True if note is not None else False
 
     while True: # Event Loop
         event, values = _win.read()
         #if event not in (None, sg.TIMEOUT_KEY, '__TIMER EVENT__'):
         #    print (event)
         #    print (values)
-        #    TODO
+        #
+        if event == '-EDT-NOTE-':
+            ctn_edited = True
 
-        if event in (sg.WIN_CLOSED, 'Exit', 'ESC'):
-            edit_note = note
+        if event == '-EDT-NOTE-+INPUT FOCUS+':
+            if ctn_edited == False:
+                _win['-EDT-NOTE-'].update (value = '')
+
+        if event == '-EDT-NOTE--INPUT FOCUS-':
+            if ctn_edited == False or values['-EDT-NOTE-'].strip() == '':
+                ctn_edited = False
+                _win['-EDT-NOTE-'].update (value = 'Take a note in MD format ...')
+
+        if event in (sg.WIN_CLOSED, 'ESC'):
+            edit_note = None
             break
         if event == 'Save & Close':
             edit_note = None
@@ -883,9 +914,10 @@ start_point = None
 drag_fig    = None
 lastxy      = None
 snap_lastxy = None
+in_drag     = False
 
 def handle (cb):
-    global dragging, start_point, drag_fig, lastxy, snap_lastxy
+    global in_drag, dragging, start_point, drag_fig, lastxy, snap_lastxy
 
     event, values = window.read(100)
     graph = window [(cardbox.name, "graph")]
@@ -899,7 +931,6 @@ def handle (cb):
         return True
 
     if event in ('-NESTED_LBL-', '-TAGS-'):
-        window['-SEARCH-'].update (value = 'Search query')
         query = collect_tags_labels (values)
         #print (query)
         if query != '':
@@ -914,6 +945,11 @@ def handle (cb):
 
     if event == '-SEARCH-+INPUT FOCUS+':
         window['-SEARCH-'].update (value = '')
+        return True
+
+    if event == '-SEARCH--INPUT FOCUS-':
+        if values['-SEARCH-'].strip() == '':
+            window['-SEARCH-'].update (value = 'Search query')
         return True
 
     if event == 'Settings::menu':
@@ -955,8 +991,8 @@ def handle (cb):
         return True
 
     if event == '-BTN-NOTE-':
-        note = cb['new_note'] ()
-        #print (note)
+        note = cb['new_note']()
+        print (note)
         if note is not None:
             cardbox.notebook.add_note (note)
             cardbox.sync_cards  (dirty_only = True)
@@ -979,6 +1015,8 @@ def handle (cb):
             dx, dy = x - lastxy [0], y - lastxy [1]
             snap_dx, snap_dy = x - snap_lastxy [0], y - snap_lastxy [1]
             if abs(dx) > 2 or abs(dy) > 2:
+                in_drag = True or in_drag
+
                 for fig in drag_fig:
                     graph.bring_figure_to_front (fig)
                     graph.move_figure (fig, dx, dy)
@@ -993,18 +1031,29 @@ def handle (cb):
         return True
 
     if event == ((cardbox.name, 'graph'), '+UP'):
-        if dragging:
+        if lastxy is not None:
             dest_fig = graph.get_figures_at_location (lastxy)[:2]
-            cardbox.swap (drag_fig, dest_fig, always_refresh = True)
 
+            if in_drag:
+                cardbox.swap (drag_fig, dest_fig, always_refresh = True)
+
+            else: # Click only on note
+                note = cardbox.find_note_at_fig (dest_fig)
+                if note:
+                    edited = cb['new_note'](note = note)
+                    print (edited)
+
+        # Reset all 
         dragging    = False
+        in_drag     = False
         drag_fig    = None
         start_point = None
         lastxy      = None
         snap_lastxy = None
+
         return True
 
-    if event in (None, sg.WINDOW_CLOSED, 'Exit'):
+    if event in (sg.WIN_CLOSED, 'Exit::menu'):
         return False
 
     if event == cardbox.name:

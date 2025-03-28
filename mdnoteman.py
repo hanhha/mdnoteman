@@ -105,13 +105,20 @@ def call_note (**kwargs):
         gui.update_show_labels  (Nb.labels)
         return True
 
+    if kwargs['cmd'] == 'note':
+        return gui.call_edit_window (note = kwargs['note'])
+
+def call_new_note (note = None):
+        return gui.call_edit_window (note)
+
 def call_open ():
     global cfg
 
     sel_notebook = sg.popup_get_folder (message = 'Select path to notebook',
                                         default_path = cfg['Notebook']['Path'],
-                                        initial_folder = str(Path.home()), grab_anywhere = True, keep_on_top = True) \
+        initial_folder = str(Path.home()), grab_anywhere = True, keep_on_top = True) \
                    or cfg['Notebook']['Path']
+    gui.flush_events ()
     if sel_notebook != cfg['Notebook']['Path']:
         cfg['Notebook']['Path'] = sel_notebook
     save_config ()
@@ -127,9 +134,6 @@ def call_settings ():
 
     cfg = gui.theme_change (cfg)
     save_config ()
-
-def call_new_note ():
-    note = gui.call_edit_window ()
 
 def clean_up ():
     global Nb
@@ -161,3 +165,4 @@ if __name__ == "__main__":
         pass
 
     clean_up ()
+    gui.pop_nested_window ()
