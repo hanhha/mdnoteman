@@ -2,7 +2,6 @@
 
 import re
 import markdown
-from markdown import util
 import requests
 from PIL import Image, ImageDraw, ImageFont
 from functools import reduce
@@ -136,11 +135,6 @@ class Markdown_Ext (markdown.Markdown):
         self.handle_children(node)
         self.render_text(node.tail, self.config["color"], False)
 
-    def handle_children (self, node):
-        if len(node) > 0:
-            for child in node:
-                self.handle_node(child)
-
     def handle_div (self, node):
         if self.image_x > self.start_x + self.indent:
             self.newline()
@@ -210,33 +204,6 @@ class Markdown_Ext (markdown.Markdown):
         # REVIEW: Ignore tail text on li items b/c.  Is this okay?
         # self.render_text(node.tail, self.config["color"], True)
         self.newline(self.config["list_item_margin_bottom"])
-
-    def handle_node (self, node):
-        #print ("Handling %s : %s : %s" % (node.tag, node.text, node.tail))
-        #print (node.attrib)
-        handlers = {
-            "a": self.handle_a,
-            "code": self.handle_code,
-            "blockquote": self.handle_blockquote,
-            "em": self.handle_em,
-            "div": self.handle_div,
-            "h1": self.handle_h,
-            "h2": self.handle_h,
-            "h3": self.handle_h,
-            "h4": self.handle_h,
-            "h5": self.handle_h,
-            "h6": self.handle_h,
-            "hr": self.handle_hr,
-            "li": self.handle_li,
-            "ol": self.handle_ol,
-            "p": self.handle_p,
-            "pre": self.handle_pre,
-            "strong": self.handle_strong,
-            "ul": self.handle_ul,
-            "img": self.handle_img,
-        }
-        handlers.get(node.tag, self.handle_unknown)(node)
-        # print "Done with %s" % node.tag
 
     def handle_ol (self, node):
         indent = self.config["list_indent"]
@@ -319,6 +286,38 @@ class Markdown_Ext (markdown.Markdown):
         print("Unknown tag: %s" % node.tag)
         self.handle_children(node)
 
+    def handle_children (self, node):
+        if len(node) > 0:
+            for child in node:
+                self.handle_node(child)
+
+    def handle_node (self, node):
+        #print ("Handling %s : %s : %s" % (node.tag, node.text, node.tail))
+        #print (node.attrib)
+        handlers = {
+            "a": self.handle_a,
+            "code": self.handle_code,
+            "blockquote": self.handle_blockquote,
+            "em": self.handle_em,
+            "div": self.handle_div,
+            "h1": self.handle_h,
+            "h2": self.handle_h,
+            "h3": self.handle_h,
+            "h4": self.handle_h,
+            "h5": self.handle_h,
+            "h6": self.handle_h,
+            "hr": self.handle_hr,
+            "li": self.handle_li,
+            "ol": self.handle_ol,
+            "p": self.handle_p,
+            "pre": self.handle_pre,
+            "strong": self.handle_strong,
+            "ul": self.handle_ul,
+            "img": self.handle_img,
+        }
+        handlers.get(node.tag, self.handle_unknown)(node)
+        # print "Done with %s" % node.tag
+
     def newline (self, h= -1):
         if h == -1:
             h = self.line_height
@@ -367,21 +366,30 @@ class Markdown_Ext (markdown.Markdown):
             text = self.compact_whitespace(text)
             start_index = 0
             end_index = 0
-            draw = self.image_draw
 
             eliminate = '' if not eliminate else eliminate
             if eliminate == '':
                 parts = text
             else:
                 parts = text.split(eliminate)
-                #print (parts)
+            #print (parts)
+            #print ("image_x %d and end_x %d"% (self.image_x, self.end_x))
             while end_index < len(parts):
                 w = 0
                 while end_index < len(parts):
                     (w, h) = self.textsize(eliminate.join(parts[start_index:end_index + 1]),
                                            font=font)
                     if self.image_x + w > self.end_x:
-                        break
+                        if end_index > start_index:
+                            break
+                        else: # break into smaller parts
+                            delta = self.end_x - self.image_x
+                            avg_w = w / len(eliminate.join(parts[start_index:end_index + 1]))
+                            split_index = int((delta // avg_w))
+                            #print (split_index)
+                            tmp1, tmp2 = parts[start_index][:split_index], parts[start_index][split_index:]
+                            parts [start_index] = tmp1
+                            parts.insert (start_index + 1, tmp2)
 
                     end_index += 1
 
@@ -396,7 +404,7 @@ class Markdown_Ext (markdown.Markdown):
 
                 self.line_height = max(h, self.line_height)
 
-                #print ("Rendering %s" % text_frag)
+                #print ("At start_index %d and end_index %d, rendering %s" %(start_index, end_index, text_frag))
                 draw.text((self.image_x, self.image_y),
                           text_frag,
                           font=font, fill=color)
@@ -409,7 +417,7 @@ class Markdown_Ext (markdown.Markdown):
                 if end_index < len(parts):
                     self.newline()
                 else:
-                    # If we are at the end of a block, write out a newline
+                    # If we are at the end of a block or out-of-line, write out a newline
                     if end_block:
                         self.newline()
                     # Otherwise, leave X at the end of the last word

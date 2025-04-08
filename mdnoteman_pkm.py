@@ -11,6 +11,13 @@ import random
 import os
 import re
 from datetime import datetime
+from PIL import Image, ImageDraw, ImageFont
+import io
+from copy import copy
+import FreeSimpleGUI as sg
+import fsg_extend as esg
+import mdnoteman_dsl as dsl
+from md2img import Markdown_Ext
 
 def listdir_nohidden (path):
     return list(filter(lambda f: not f.startswith('.'), os.listdir(path)))
@@ -30,7 +37,7 @@ def parse_note_file (path, upd_records = None):
     timestamp_re  = re.compile(r"^@\[\d+\]$")
     label_re      = re.compile(r'^[\s\t]*(@\b[^,|&!~\s|]+\b[\s\t]*)+$')
     tag_re        = re.compile(r'^[\s\t]*(#\b[^,|&!~\s|]+\b[\s\t]*)+$')
-    link_re       = re.compile(r'\[\d+\]')
+    link_re       = re.compile(r'\(\d+\)')
 
     fulltxt = ''
     is_tags_read       = False
@@ -80,7 +87,7 @@ def parse_note_file (path, upd_records = None):
                     labels     = []
                     links      = []
                     tags       = []
-                    color      = 'white'
+                    color      = '#FFFFFF'
                     content    = ''
                     prefer_idx = 0
                     is_tags_read       = False
@@ -174,7 +181,7 @@ class Note:
     content   : str = ''
     timestamp : int = 0
     links     : List[int] = field (default_factory = lambda: [])
-    color     : str = 'white'
+    color     : str = '#FFFFFF'
     prefer_idx: int = 0 # start from 1, 0 == undefined
     dirty     : bool = False
     deleted   : bool = False
@@ -182,7 +189,7 @@ class Note:
     @property
     def simple_context (self):
         _content = "---\n\n"
-        _content += ' '.join(['#' + tag for tag in self.tags]) + "\n\n"
+        _content += ' '.join(['\#' + tag for tag in self.tags]) + "\n\n"
         _content += ' '.join(['@' + lbl for lbl in self.labels])
         return _content
 
@@ -397,9 +404,9 @@ class Notebook:
             lbl = l.split ('/')
             self.add_lbl (self.labels, lbl)
 
-    def add_note (self, note_info):
+    def add_note (self, note_info, set_dirty = False):
         note = Note ()
-        note.set (note_info)
+        note.set (note_info, set_dirty = set_dirty)
 
         if note.prefer_idx == 0: # undefined
             self.notes.append (note)
@@ -423,6 +430,356 @@ class Notebook:
         for i in range (num):
             note = Note(name = name_prf + str(i), title = f"Test note {i}", content = "Test note " * random.randrange (2, 240, 2))
             self.add_note (note)
+
+@dataclass
+class NoteCard:
+    note: Note = None
+    name: str = None
+    width: int = 240
+    _thumbnail: Image = None
+    _thumbnail_bio: io.BytesIO = None
+
+    @property
+    def thumbnail (self):
+        return self._thumbnail
+
+    @property
+    def thumbnail_bio (self):
+        return self._thumbnail_bio
+
+    def set_fig (self, fig):
+        self.fig = fig
+
+    def init (self, md = None):
+        self.update (md)
+
+    def update (self, md):
+        ctn       = md.convert_img (self.note.simple_content)
+        ctn_h     = 240 if (ctn.size[1] > 240) else ctn.size[1]
+        ctx       = md.convert_img (self.note.simple_context)
+        ctx_h     = ctx.size [1]
+        img = Image.new ("RGBA", (self.width, ctn_h + ctx_h))
+        img.paste (ctn, (0, 0))
+        img.paste (ctx, (0, ctn_h))
+        bio = io.BytesIO ()
+        img.save (bio, format = "PNG")
+        self._thumbnail = img.copy ()
+        self._thumbnail_bio = bio.getvalue ()
+        del img
+
+@dataclass
+class CardBox:
+    cards    : List[NoteCard] = field (default_factory = lambda: [])
+    notebook : Notebook = None
+    n_cols   : int = 3
+    window   : sg.Window = None
+    name     : str = ''
+    width    : int = 768
+    md       : Markdown_Ext = None
+    graph    : esg.Graph = None
+
+    def get_note_by_timestamp (self, timestamp):
+        for note in self.cards:
+            if note.note.timestamp == timestamp:
+                return note
+        return None
+
+    def scroll_handle (self, event):
+        if self.container_scroll_cb:
+            self.container_scroll_cb (event)
+        return 'break'
+
+    @property
+    def layout (self):
+        comm_menu = ["",["that","this","there",['Thing1','Thing2',"those"]]]
+        note_menu = ["",["Color::fig_color",
+                         "Add labels::fig_menu","Add tags::fig_menu", "Delete::fig_menu"]]
+        _layout = [(esg.Graph (key = (self.name, "graph"),
+                              canvas_size = (self.width, 1), graph_bottom_left = (0, 1), graph_top_right = (self.width, 0),
+                               expand_x = True, expand_y = True, enable_events = True, drag_submits = True,
+                               comm_right_click_menu = comm_menu, fig_right_click_menu = note_menu))]
+        return [_layout]
+
+    @property
+    def cards_oi (self):
+        """ return cards of interest """
+        return self._cards_oi
+
+    def filter (self, query_str = ''):
+        changed = False
+        if query_str != '':
+            l = len (self.cards)
+            try:
+                dsl.lexer.input (query_str)
+                flt = dsl.build_ast (dsl.lexer)
+            except ValueError as err:
+                print ("Invalid query string %s - Ignored" %(query_str))
+                flt = None
+            if flt:
+                print (flt)
+                self._cards_oi = []
+                tst_ovrd = False
+                for i in range (l):
+                    tst = False
+                    if not tst_ovrd:
+                        try:
+                            tst = flt.analyze (tags = self.cards[i].note.tags, labels = self.cards[i].note.labels, ctn = self.cards[i].note.content)
+                        except ValueError:
+                            print ("Invalid query string %s - Ignored" %(query_str))
+                            tst = True
+                            tst_ovrd = True
+                    if tst_ovrd or tst:
+                        self._cards_oi.append (self.cards[i])
+                changed = True
+        else:
+            self._cards_oi = self.cards
+            changed = True
+
+        if changed:
+            self.refresh_box ()
+
+    def set_notebook (self, nb):
+        self.notebook = nb
+        self.sync_cards ()
+
+    def sync_cards (self, dirty_only = False):
+        print ("Syncing cards to box ...")
+
+        for note in self.notebook.notes:
+            if (not dirty_only) or (note.dirty):
+                card = NoteCard(note = note)
+                card.init (self.md)
+                self.add_or_replace (card)
+
+        self.filter ()
+
+        print ("Sync notes to cardbox done.")
+
+    def add_or_replace (self, card):
+        l = len(self.cards)
+        i = 0
+        while i < l:
+            if self.cards[i].note.timestamp == card.note.timestamp:
+                break
+            i += 1
+
+        if i < l:
+            if not card.note.deleted:
+                ret = self.cards[i]
+                self.cards[i] = card
+            else:
+                self.card.pop (i)
+        else:
+            if not card.note.deleted:
+                self.cards.insert (0, card)
+
+    def erase (self):
+        self.window[self.name].set_vscroll_position (0)
+        size = self.window[self.name].get_size ()
+        h = size[1] - 10
+        self.graph.set_size ((self.width, h))
+        self.graph.change_coordinates ((0, h), (self.width, 0))
+        self.graph.erase()
+
+    def resize (self, width):
+        self.width = width
+        old_n_cols = self.n_cols
+        self.n_cols = self.width // 256
+
+        if self.n_cols != old_n_cols:
+            self.refresh_box ()
+
+    def rearrange_box (self):
+        N = len (self.cards_oi)
+
+        c = 0
+        for n in range (N):
+            i = 1
+            y = 0
+            upper_n = n - i*self.n_cols
+            while (upper_n >= 0):
+                y += (self.cards_oi[upper_n].thumbnail.size[1] + 16)
+                i += 1
+                upper_n = n - i*self.n_cols
+
+            w,h = self.cards_oi[n].thumbnail.size
+            if y + 16 + h > self.graph.CanvasSize [1]:
+                self.graph.set_size ((self.width, y + 16 + h))
+                self.graph.change_coordinates ((0, y + 16 + h), (self.width, 0))
+
+            (ox1, oy1), (ox2, oy2) = self.graph.get_bounding_box (self.cards_oi[n].fig[0])
+            self.graph.move_figure (self.cards_oi[n].fig[0], c * 256 + 6 - ox1, y + 6 - oy1)
+            (ox1, oy1), (ox2, oy2) = self.graph.get_bounding_box (self.cards_oi[n].fig[1])
+            self.graph.move_figure (self.cards_oi[n].fig[1], c * 256 + 8 - ox1, y + 8 - oy1)
+            c = 0 if (c + 1 == self.n_cols) else c + 1
+
+        self.window [self.name].widget.update ()
+        self.window [self.name].contents_changed ()
+        self.window [self.name].expand (expand_row = True)
+
+    def refresh_box (self):
+        self.n_cols = self.width // 256
+        N = len (self.cards_oi)
+
+        if self.window:
+            self.erase ()
+
+            c = 0
+            for n in range (N):
+                i = 1
+                y = 0
+                upper_n = n - i*self.n_cols
+                while (upper_n >= 0):
+                    y += (self.cards_oi[upper_n].thumbnail.size[1] + 16)
+                    i += 1
+                    upper_n = n - i*self.n_cols
+
+                w,h = self.cards_oi[n].thumbnail.size
+                if y + 16 + h > self.graph.CanvasSize [1]:
+                    self.graph.set_size ((self.width, y + 16 + h))
+                    self.graph.change_coordinates ((0, y + 16 + h), (self.width, 0))
+
+                bg  = self.graph.draw_rectangle (top_left = (c * 256 + 6, y + 6),
+                                                 bottom_right = (c * 256 + 8 + w + 2, y + 8 + h + 2),
+                                                 line_color = 'black', line_width = 1,
+                                                 fill_color = self.cards_oi[n].note.color)
+                fig = self.graph.draw_image (data = self.cards_oi[n].thumbnail_bio, location = (c * 256 + 8, y + 8))
+                self.cards_oi[n].set_fig ((bg, fig))
+                c = 0 if (c + 1 == self.n_cols) else c + 1
+
+            self.window [self.name].widget.update ()
+            self.window [self.name].contents_changed ()
+            self.window [self.name].expand (expand_row = True)
+
+    def find_note_at_fig (self, fig):
+        for card in self.cards_oi:
+            if card.fig == fig:
+                return card.note
+        return None
+
+    def swap (self, fig1, fig2, always_refresh = False):
+        #print (f"{fig1} <-> {fig2}")
+
+        if fig1 != fig2:
+            fig1_found = fig2_found = False
+            fig1_idx = fig2_idx = 0
+
+            for i in range (len (self.cards_oi)):
+                if self.cards_oi[i].fig == fig1:
+                    fig1_idx = i
+                    fig1_found = True
+                    if fig1_found and fig2_found:
+                        break
+                    else:
+                        continue
+                if self.cards_oi[i].fig == fig2:
+                    fig2_idx = i
+                    fig2_found = True
+                    if fig1_found and fig2_found:
+                        break
+                    else:
+                        continue
+
+            if fig1_found and fig2_found:
+                note1_idx = self.cards_oi[fig1_idx].note.prefer_idx - 1
+                note2_idx = self.cards_oi[fig2_idx].note.prefer_idx - 1
+                #print (note1_idx)
+                #print (note2_idx)
+
+                # Swap in notebook
+                tmp_note = self.notebook.notes[note1_idx]
+                self.notebook.notes[note1_idx] = self.notebook.notes[note2_idx]
+                self.notebook.notes[note2_idx] = tmp_note
+                self.notebook.notes[note1_idx].set_dirty ()
+                self.notebook.notes[note2_idx].set_dirty ()
+                self.notebook.notes[note1_idx].prefer_idx = note1_idx + 1
+                self.notebook.notes[note2_idx].prefer_idx = note2_idx + 1
+
+                # Swpa in cardbox
+                tmp_note = self.cards_oi [fig1_idx]
+                self.cards_oi [fig1_idx] = self.cards_oi [fig2_idx]
+                self.cards_oi [fig2_idx] = tmp_note
+
+                # Refresh
+                if not always_refresh:
+                    self.rearrange_box ()
+
+        # Refresh
+        if always_refresh:
+            self.rearrange_box ()
+
+    def find_notes_from_fig (self, fig):
+        notes = []
+        for note in self.cards_oi:
+            if note.fig [1] in fig:
+                notes.append (note)
+        return notes
+
+    def delete_note (self, notes):
+        for note in notes:
+            self.cards_oi.remove (note)
+            note.note.set_dirty (delete = True)
+        self.notebook.Sync ()
+        self.refresh_box ()
+        print ("Deleted note.")
+
+    def change_note_color (self, notes, color):
+        for note in notes:
+            if color != note.note.color:
+                note.note.color = color
+                note.note.set_dirty ()
+                (x, y), (x_w, y_h) = self.graph.get_bounding_box (note.fig[0])
+                self.graph.delete_figure(note.fig[0])
+                bg  = self.graph.draw_rectangle (top_left = (x, y),
+                                                 bottom_right = (x_w, y_h),
+                                                 line_color = 'black', line_width = 1,
+                                                 fill_color = note.note.color)
+                self.graph.send_figure_to_back (bg)
+                note.set_fig ((bg, note.fig[1]))
+
+    def change_note_tags (self, notes, tags):
+        for note in notes:
+            new_note = copy(note.note)
+            new_note.tags = tags
+            self.notebook.update_note (note.note, new_note, True)
+        print ("Updated tags.")
+
+    def change_note_labels (self, notes, labels):
+        for note in notes:
+            new_note = copy(note.note)
+            new_note.labels = labels
+            self.notebook.update_note (note.note, new_note, True)
+        print ("Updated labels.")
+
+    def update_note (self, notes, color = None, tags = None, labels = None, delete = False):
+        if delete:
+            self.delete_note (notes)
+            return
+        if color is not None:
+            self.change_note_color (notes, color)
+        if tags is not None:
+            self.change_note_tags (notes, tags)
+            self.sync_cards  (dirty_only = True)
+            self.refresh_box ()
+        if labels is not None:
+            self.change_note_labels (notes, labels)
+            self.sync_cards  (dirty_only = True)
+            self.refresh_box ()
+
+    def init (self, window, cfg, container_scroll_cb = None):
+        config = {'color': (0,0,0,255), 'margin_bottom': 8,
+                  'bold_font_path' : cfg['Fonts']['Bold'],
+                  'code_font_path' : cfg['Fonts']['Code'],
+                  'code_font_size' : int(cfg['Fonts']['Code_size']),
+                  'default_font_path': cfg['Fonts']['Dflt'],
+                  'italics_font_path': cfg['Fonts']['Italic'],
+                  'font_size': int(cfg['Fonts']['Size'])}
+
+        self.md = Markdown_Ext ([(0, 0, 240)], config)
+        self.window = window
+        self.graph = self.window[(self.name, "graph")]
+        self.container_scroll_cb = container_scroll_cb
+        self.graph.widget.bind ('<MouseWheel>', self.scroll_handle)
 
 if __name__ == '__main__':
     pass

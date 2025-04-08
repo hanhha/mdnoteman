@@ -74,8 +74,9 @@ def call_note (**kwargs):
     #print (notes)
     if kwargs['cmd'] == 'color':
         l = len (notes)
-        color = notes[0].note.color [1:] if l == 1 else None
+        color = notes[0].note.color if l == 1 else None
         new_color = gui.call_color_chooser_window (color = color, location = kwargs['location'])
+        print (new_color)
         gui.cardbox.update_note (notes, color = new_color)
         return True
 

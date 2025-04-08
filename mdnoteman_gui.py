@@ -5,20 +5,18 @@ if sys.hexversion < 0x03070000:
     print("!!! This component requires Python version 3.7 at least !!!")
     sys.exit(1)
 
+import markdown
 import FreeSimpleGUI as sg
-from fsg_calendar import Calendar
-import fsg_extend as esg
-from tkhtmlview import html_parser
 import tkinter as tk
-from md2img import Markdown_Ext
-from mdnoteman_pkm import Note, Notebook
-from dataclasses import dataclass, field
-from typing import List, Dict, Set
-from PIL import Image, ImageDraw, ImageFont
-import io
 import base64
 import re
-import mdnoteman_dsl as dsl
+import time
+
+from fsg_calendar import Calendar
+from tkhtmlview import html_parser
+from mdnoteman_pkm import Note, Notebook, CardBox
+from dataclasses import dataclass, field
+from typing import List, Dict, Set
 from copy import copy
 
 debug = False
@@ -77,348 +75,16 @@ def pop_nested_window (_win = None):
 
         win[0].close ()
         if len(window_stack) > 0:
-            window_stack[-1][0].read () # Flush event read before back to previous window
+            window_stack[-1][0].read (10) # Flush event read before back to previous window
 
-@dataclass
-class NoteCard:
-    note: Note = None
-    name: str = None
-    width: int = 240
-    _thumbnail: Image = None
-    _thumbnail_bio: io.BytesIO = None
-
-    @property
-    def thumbnail (self):
-        return self._thumbnail
-
-    @property
-    def thumbnail_bio (self):
-        return self._thumbnail_bio
-
-    def set_fig (self, fig):
-        self.fig = fig
-
-    def init (self, md = None):
-        self.update (md)
-
-    def update (self, md):
-        ctn       = md.convert_img (self.note.simple_content)
-        ctn_h     = 240 if (ctn.size[1] > 240) else ctn.size[1]
-        ctx       = md.convert_img (self.note.simple_context)
-        ctx_h     = ctx.size [1]
-        img = Image.new ("RGBA", (self.width, ctn_h + ctx_h))
-        img.paste (ctn, (0, 0))
-        img.paste (ctx, (0, ctn_h))
-        bio = io.BytesIO ()
-        img.save (bio, format = "PNG")
-        self._thumbnail = img.copy ()
-        self._thumbnail_bio = bio.getvalue ()
-        del img
-
-@dataclass
-class CardBox:
-    cards    : List[NoteCard] = field (default_factory = lambda: [])
-    notebook : Notebook = None
-    n_cols   : int = 3
-    window   : sg.Window = None
-    name     : str = ''
-    width    : int = 768
-    md       : Markdown_Ext = None
-    graph    : esg.Graph = None
-
-    def get_note_by_timestamp (self, timestamp):
-        for note in self.cards:
-            if note.note.timestamp == timestamp:
-                return note
-        return None
-
-    def scroll_handle (self, event):
-        if self.container_scroll_cb:
-            self.container_scroll_cb (event)
-        return 'break'
-
-    @property
-    def layout (self):
-        comm_menu = ["",["that","this","there",['Thing1','Thing2',"those"]]]
-        note_menu = ["",["Color::fig_color",
-                         "Add labels::fig_menu","Add tags::fig_menu", "Delete::fig_menu"]]
-        _layout = [(esg.Graph (key = (self.name, "graph"),
-                              canvas_size = (self.width, 1), graph_bottom_left = (0, 1), graph_top_right = (self.width, 0),
-                               expand_x = True, expand_y = True, enable_events = True, drag_submits = True,
-                               comm_right_click_menu = comm_menu, fig_right_click_menu = note_menu))]
-        return [_layout]
-
-    @property
-    def cards_oi (self):
-        """ return cards of interest """
-        return self._cards_oi
-
-    def filter (self, query_str = ''):
-        changed = False
-        if query_str != '':
-            l = len (self.cards)
-            try:
-                dsl.lexer.input (query_str)
-                flt = dsl.build_ast (dsl.lexer)
-            except ValueError as err:
-                print ("Invalid query string %s - Ignored" %(query_str))
-                flt = None
-            if flt:
-                print (flt)
-                self._cards_oi = []
-                tst_ovrd = False
-                for i in range (l):
-                    tst = False
-                    if not tst_ovrd:
-                        try:
-                            tst = flt.analyze (tags = self.cards[i].note.tags, labels = self.cards[i].note.labels, ctn = self.cards[i].note.content)
-                        except ValueError:
-                            print ("Invalid query string %s - Ignored" %(query_str))
-                            tst = True
-                            tst_ovrd = True
-                    if tst_ovrd or tst:
-                        self._cards_oi.append (self.cards[i])
-                changed = True
-        else:
-            self._cards_oi = self.cards
-            changed = True
-
-        if changed:
-            self.refresh_box ()
-
-    def set_notebook (self, nb):
-        self.notebook = nb
-        self.sync_cards ()
-
-    def sync_cards (self, dirty_only = False):
-        print ("Syncing cards to box ...")
-
-        for note in self.notebook.notes:
-            if (not dirty_only) or (note.dirty):
-                card = NoteCard(note = note)
-                card.init (self.md)
-                self.add_or_replace (card)
-
-        self.filter ()
-
-        print ("Sync notes to cardbox done.")
-
-    def add_or_replace (self, card):
-        for i in range(len(self.cards)):
-            if self.cards[i].note.timestamp == card.note.timestamp:
-                ret = self.cards[i]
-                self.cards[i] = card
-                return ret
-        self.cards.insert (0, card)
-        return None
-
-    def erase (self):
-        self.window[self.name].set_vscroll_position (0)
-        size = self.window[self.name].get_size ()
-        h = size[1] - 10
-        self.graph.set_size ((self.width, h))
-        self.graph.change_coordinates ((0, h), (self.width, 0))
-        self.graph.erase()
-
-    def resize (self, width):
-        self.width = width
-        old_n_cols = self.n_cols
-        self.n_cols = self.width // 256
-
-        if self.n_cols != old_n_cols:
-            self.refresh_box ()
-
-    def rearrange_box (self):
-        N = len (self.cards_oi)
-
-        c = 0
-        for n in range (N):
-            i = 1
-            y = 0
-            upper_n = n - i*self.n_cols
-            while (upper_n >= 0):
-                y += (self.cards_oi[upper_n].thumbnail.size[1] + 16)
-                i += 1
-                upper_n = n - i*self.n_cols
-
-            w,h = self.cards_oi[n].thumbnail.size
-            if y + 16 + h > self.graph.CanvasSize [1]:
-                self.graph.set_size ((self.width, y + 16 + h))
-                self.graph.change_coordinates ((0, y + 16 + h), (self.width, 0))
-
-            (ox1, oy1), (ox2, oy2) = self.graph.get_bounding_box (self.cards_oi[n].fig[0])
-            self.graph.move_figure (self.cards_oi[n].fig[0], c * 256 + 6 - ox1, y + 6 - oy1)
-            (ox1, oy1), (ox2, oy2) = self.graph.get_bounding_box (self.cards_oi[n].fig[1])
-            self.graph.move_figure (self.cards_oi[n].fig[1], c * 256 + 8 - ox1, y + 8 - oy1)
-            c = 0 if (c + 1 == self.n_cols) else c + 1
-
-        self.window [self.name].widget.update ()
-        self.window [self.name].contents_changed ()
-        self.window [self.name].expand (expand_row = True)
-
-    def refresh_box (self):
-        self.n_cols = self.width // 256
-        N = len (self.cards_oi)
-
-        if self.window:
-            self.erase ()
-
-            c = 0
-            for n in range (N):
-                i = 1
-                y = 0
-                upper_n = n - i*self.n_cols
-                while (upper_n >= 0):
-                    y += (self.cards_oi[upper_n].thumbnail.size[1] + 16)
-                    i += 1
-                    upper_n = n - i*self.n_cols
-
-                w,h = self.cards_oi[n].thumbnail.size
-                if y + 16 + h > self.graph.CanvasSize [1]:
-                    self.graph.set_size ((self.width, y + 16 + h))
-                    self.graph.change_coordinates ((0, y + 16 + h), (self.width, 0))
-
-                bg  = self.graph.draw_rectangle (top_left = (c * 256 + 6, y + 6),
-                                                 bottom_right = (c * 256 + 8 + w + 2, y + 8 + h + 2),
-                                                 line_color = 'black', line_width = 1,
-                                                 fill_color = self.cards_oi[n].note.color)
-                fig = self.graph.draw_image (data = self.cards_oi[n].thumbnail_bio, location = (c * 256 + 8, y + 8))
-                self.cards_oi[n].set_fig ((bg, fig))
-                c = 0 if (c + 1 == self.n_cols) else c + 1
-
-            self.window [self.name].widget.update ()
-            self.window [self.name].contents_changed ()
-            self.window [self.name].expand (expand_row = True)
-
-    def find_note_at_fig (self, fig):
-        for card in self.cards_oi:
-            if card.fig == fig:
-                return card.note
-        return None
-
-    def swap (self, fig1, fig2, always_refresh = False):
-        #print (f"{fig1} <-> {fig2}")
-
-        if fig1 != fig2:
-            fig1_found = fig2_found = False
-            fig1_idx = fig2_idx = 0
-
-            for i in range (len (self.cards_oi)):
-                if self.cards_oi[i].fig == fig1:
-                    fig1_idx = i
-                    fig1_found = True
-                    if fig1_found and fig2_found:
-                        break
-                    else:
-                        continue
-                if self.cards_oi[i].fig == fig2:
-                    fig2_idx = i
-                    fig2_found = True
-                    if fig1_found and fig2_found:
-                        break
-                    else:
-                        continue
-
-            if fig1_found and fig2_found:
-                note1_idx = self.cards_oi[fig1_idx].note.prefer_idx - 1
-                note2_idx = self.cards_oi[fig2_idx].note.prefer_idx - 1
-                #print (note1_idx)
-                #print (note2_idx)
-
-                # Swap in notebook
-                tmp_note = self.notebook.notes[note1_idx]
-                self.notebook.notes[note1_idx] = self.notebook.notes[note2_idx]
-                self.notebook.notes[note2_idx] = tmp_note
-                self.notebook.notes[note1_idx].set_dirty ()
-                self.notebook.notes[note2_idx].set_dirty ()
-                self.notebook.notes[note1_idx].prefer_idx = note1_idx + 1
-                self.notebook.notes[note2_idx].prefer_idx = note2_idx + 1
-
-                # Swpa in cardbox
-                tmp_note = self.cards_oi [fig1_idx]
-                self.cards_oi [fig1_idx] = self.cards_oi [fig2_idx]
-                self.cards_oi [fig2_idx] = tmp_note
-
-                # Refresh
-                if not always_refresh:
-                    self.rearrange_box ()
-
-        # Refresh
-        if always_refresh:
-            self.rearrange_box ()
-
-    def find_notes_from_fig (self, fig):
-        notes = []
-        for note in self.cards_oi:
-            if note.fig [1] in fig:
-                notes.append (note)
-        return notes
-
-    def delete_note (self, notes):
-        for note in notes:
-            self.cards_oi.remove (note)
-            note.note.set_dirty (delete = True)
-        self.notebook.Sync ()
-        self.refresh_box ()
-        print ("Deleted note.")
-
-    def change_note_color (self, notes, color):
-        for note in notes:
-            if color != note.note.color:
-                note.note.color = '#' + color
-                note.note.set_dirty ()
-                (x, y), (x_w, y_h) = self.graph.get_bounding_box (note.fig[0])
-                self.graph.delete_figure(note.fig[0])
-                bg  = self.graph.draw_rectangle (top_left = (x, y),
-                                                 bottom_right = (x_w, y_h),
-                                                 line_color = 'black', line_width = 1,
-                                                 fill_color = note.note.color)
-                self.graph.send_figure_to_back (bg)
-                note.set_fig ((bg, note.fig[1]))
-
-    def change_note_tags (self, notes, tags):
-        for note in notes:
-            new_note = copy(note.note)
-            new_note.tags = tags
-            self.notebook.update_note (note.note, new_note, True)
-        print ("Updated tags.")
-
-    def change_note_labels (self, notes, labels):
-        for note in notes:
-            new_note = copy(note.note)
-            new_note.labels = labels
-            self.notebook.update_note (note.note, new_note, True)
-        print ("Updated labels.")
-
-    def update_note (self, notes, color = None, tags = None, labels = None, delete = False):
-        if delete:
-            self.delete_note (notes)
-            return
-        if color is not None:
-            self.change_note_color (notes, color)
-        if tags is not None:
-            self.change_note_tags (notes, tags)
-            self.sync_cards  (dirty_only = True)
-            self.refresh_box ()
-        if labels is not None:
-            self.change_note_labels (notes, labels)
-            self.sync_cards  (dirty_only = True)
-            self.refresh_box ()
-
-    def init (self, window, cfg, container_scroll_cb = None):
-        config = {'color': (0,0,0,255), 'margin_bottom': 8,
-                  'bold_font_path' : cfg['Fonts']['Bold'],
-                  'code_font_path' : cfg['Fonts']['Code'],
-                  'code_font_size' : int(cfg['Fonts']['Code_size']),
-                  'default_font_path': cfg['Fonts']['Dflt'],
-                  'italics_font_path': cfg['Fonts']['Italic'],
-                  'font_size': int(cfg['Fonts']['Size'])}
-
-        self.md = Markdown_Ext ([(0, 0, 240)], config)
-        self.window = window
-        self.graph = self.window[(self.name, "graph")]
-        self.container_scroll_cb = container_scroll_cb
-        self.graph.widget.bind ('<MouseWheel>', self.scroll_handle)
+def set_html (widget, html, strip = True):
+    parser = html_parser.HTMLTextParser()
+    prev_state = widget.cget('state')
+    widget.config(state=sg.tk.NORMAL)
+    widget.delete('1.0', sg.tk.END)
+    widget.tag_delete(widget.tag_names)
+    parser.w_set_html(widget, html, strip=strip)
+    widget.config(state=prev_state)
 
 def make_label_tree (label_tree = None):
     sg_lbl_tree = sg.TreeData ()
@@ -627,7 +293,7 @@ def call_tags_chooser_window (title, tags, selected_tags, relax_list_order = Fal
                       keep_on_top = True, location = (location[0], location[1] - 32),
                       finalize = True, icon = assets['win_ico'],
                       resizable = False)
-    push_nested_window (_win, False)
+    push_nested_window (_win, True)
     _win.bind ('<FocusOut>', 'LostFocus')
     _win.bind ('<Escape>', 'ESC')
     _win['-IN-'].bind('<Return>', 'Enter')
@@ -640,7 +306,7 @@ def call_tags_chooser_window (title, tags, selected_tags, relax_list_order = Fal
     input_txt = ''
 
     while True:
-        event, values = _win.read ()
+        event, values = _win.read (100)
         #if event not in (None, sg.TIMEOUT_KEY, '__TIMER EVENT__'):
         #    print (event)
         #    print (values)
@@ -663,6 +329,7 @@ def call_tags_chooser_window (title, tags, selected_tags, relax_list_order = Fal
         if event == '-IN-Enter':
             strip_inp = values['-IN-'].strip(', ')
             tags_inp = re.split(r'[,\s]+', strip_inp) if (strip_inp != '') else []
+
             new_tags = []
             for k in tags.keys():
                 if values[k]:
@@ -687,37 +354,37 @@ def call_tags_chooser_window (title, tags, selected_tags, relax_list_order = Fal
     pop_nested_window (_win)
 
     new_tags.extend (tags_inp)
-    return set(new_tags) if set(new_tags) != set(selected_tags) else None 
+    return set(new_tags) != set(selected_tags), set(new_tags)
 
 def call_color_chooser_window (color = None, location = None):
     color_dict = {}
-    color_dict ['White']        = 'FFFFFF'
-    color_dict ['Pink']         = 'FF69B4'
-    color_dict ['Gray']         = 'ABABAB'
-    color_dict ['Yellow']       = 'FFFF00'
-    color_dict ['Light Blue']   = '87CEFA'
-    color_dict ['Light Green']  = '90EE90'
-    color_dict ['Light Purple'] = '9370DB'
+    color_dict ['White']        = '#FFFFFF'
+    color_dict ['Pink']         = '#FF69B4'
+    color_dict ['Gray']         = '#ABABAB'
+    color_dict ['Yellow']       = '#FFFF00'
+    color_dict ['Light Blue']   = '#87CEFA'
+    color_dict ['Light Green']  = '#90EE90'
+    color_dict ['Light Purple'] = '#9370DB'
 
     prev = {}
-    prev ['FFFFFF'] = False
-    prev ['FF69B4'] = False
-    prev ['ABABAB'] = False
-    prev ['FFFF00'] = False
-    prev ['87CEFA'] = False
-    prev ['90EE90'] = False
-    prev ['9370DB'] = False
+    prev ['#FFFFFF'] = False
+    prev ['#FF69B4'] = False
+    prev ['#ABABAB'] = False
+    prev ['#FFFF00'] = False
+    prev ['#87CEFA'] = False
+    prev ['#90EE90'] = False
+    prev ['#9370DB'] = False
 
     cb = []
     for k,v in color_dict.items():
-        cb.append ([sg.Checkbox(k, key = v, background_color = '#' + v, expand_x = True)])
+        cb.append ([sg.Checkbox(k, key = v, background_color = v, expand_x = True)])
 
     _win = sg.Window ('', layout = cb, modal = True,
                       no_titlebar = True,
                       keep_on_top = True, location = (location[0], location[1] - 32),
                       finalize = True, icon = assets['win_ico'],
                       resizable = False)
-    push_nested_window (_win, False)
+    push_nested_window (_win, True)
     _win.bind ('<FocusOut>', 'LostFocus')
     _win.bind ('<ButtonRelease-1>', 'Release')
     _win.bind ('<Escape>', 'ESC')
@@ -728,7 +395,7 @@ def call_color_chooser_window (color = None, location = None):
         prev[color] = True
 
     while True:
-        event, values = _win.read ()
+        event, values = _win.read (100)
         #if event not in (None, sg.TIMEOUT_KEY, '__TIMER EVENT__'):
         #    print (event)
         #    print (values)
@@ -756,7 +423,7 @@ def call_color_chooser_window (color = None, location = None):
     return selected
 
 def call_edit_window (note = None):
-    if note is not None:
+    if note:
         ctn    = note.content
         tags   = note.tags
         labels = note.labels
@@ -769,20 +436,26 @@ def call_edit_window (note = None):
         links  = []
         color  = '#FFFFFF' # White
 
+    existed_tags = copy(cardbox.notebook.tags)
+    existed_lbls = copy(cardbox.notebook.labels_flatten)
+
     md_layout = [[sg.Multiline (key = '-EDT-NOTE-', expand_x = True, expand_y = True,
                                 default_text = ctn,
+                                size = (80, 10),
+                                right_click_menu = [[''], ['Copy::menu', 'Paste::menu', 'Cut::menu']],
+                                enable_events = True,
                                 do_not_clear = True)]]
-    preview_layout = [[]]
-    layout = [[sg.TabGroup([[sg.Tab('Markdown', md_layout, tooltip = 'Markdown format'),
-                             sg.Tab('Preview', preview_layout, tooltip = 'Preview')]], expand_x = True, expand_y = True)],
+    preview_layout = [[sg.Multiline (key = '-VIEW-NOTE-', expand_x = True, expand_y = True,
+                                     size = (80, 10),
+                                     disabled = True)]]
+
+    layout = [[sg.TabGroup([[sg.Tab('Markdown', md_layout, tooltip = 'Markdown format', key = '-EDT-TAB-'),
+                             sg.Tab('Preview', preview_layout, tooltip = 'Preview', key = '-VIEW-TAB-')]], expand_x = True, expand_y = True, enable_events = True)],
               [sg.Button (key = '-BTN-COLOR-', border_width = 1, image_source = assets['color_ico'],
                           button_color = (color, color),
                           image_subsample = 15, tooltip = "Change background color of note"),
                sg.Button ('Add labels'),
                sg.Button ('Add tags'),
-               sg.Button (key = '-BTN-IMG-', border_width = 1, image_source = assets['picture_ico'],
-                          button_color = (sg.theme_background_color(), sg.theme_background_color ()),
-                          image_subsample = 16, tooltip = 'Add image to note'),
                sg.Button (key = '-BTN-DWG-', border_width = 1, image_source = assets['drawing_ico'],
                           button_color = (sg.theme_background_color(), sg.theme_background_color ()),
                           image_subsample = 16, tooltip = 'Add drawing to note'),
@@ -803,36 +476,95 @@ def call_edit_window (note = None):
     _win['-EDT-NOTE-'].bind ('<FocusIn>', '+INPUT FOCUS+')
     _win['-EDT-NOTE-'].bind ('<FocusOut>', '-INPUT FOCUS-')
 
-    ctn_edited = True if note is not None else False
+    ctn_edited  = True if note is not None else False
+    note_delete = False
 
     while True: # Event Loop
-        event, values = _win.read()
+        event, values = _win.read(100)
         #if event not in (None, sg.TIMEOUT_KEY, '__TIMER EVENT__'):
         #    print (event)
         #    print (values)
-        #
+
+        if event == 0 and values[0] == '-VIEW-TAB-':
+            #print (markdown.markdown (values['-EDT-NOTE-']))
+            set_html (_win['-VIEW-NOTE-'].Widget, markdown.markdown (values['-EDT-NOTE-']))
+            continue
+
         if event == '-EDT-NOTE-':
             ctn_edited = True
+            continue
 
         if event == '-EDT-NOTE-+INPUT FOCUS+':
             if ctn_edited == False:
                 _win['-EDT-NOTE-'].update (value = '')
+            continue
 
         if event == '-EDT-NOTE--INPUT FOCUS-':
             if ctn_edited == False or values['-EDT-NOTE-'].strip() == '':
                 ctn_edited = False
                 _win['-EDT-NOTE-'].update (value = 'Take a note in MD format ...')
+            continue
+
+        if event == '-BTN-DEL-':
+            note_delete = True
+            edit_note   = None
+            break
+
+        if event == '-BTN-COLOR-':
+            root_location = (_win['-BTN-COLOR-'].widget.winfo_rootx(), _win['-BTN-COLOR-'].widget.winfo_rooty())
+            new_color = call_color_chooser_window (color = color, location = root_location)
+            if new_color:
+                color = new_color
+                _win['-BTN-COLOR-'].update (button_color = color)
+            continue
+
+        if event == 'Add tags':
+            root_location = (_win['Add tags'].widget.winfo_rootx(), _win['Add tags'].widget.winfo_rooty())
+            changed, new_tags = call_tags_chooser_window ("Tag note", tags = existed_tags, selected_tags = tags,
+                                                 location = root_location, relax_list_order = True, row_limit = 8)
+            if changed:
+                if new_tags:
+                    for t in new_tags:
+                        if t not in existed_tags:
+                            existed_tags [t] = 1
+                        else:
+                            if t not in tags:
+                                existed_tags [t] += 1
+
+                    tags = new_tags
+                else:
+                    tags = []
+            continue
+
+        if event == 'Add labels':
+            root_location = (_win['Add labels'].widget.winfo_rootx(), _win['Add labels'].widget.winfo_rooty())
+            changed, new_labels = call_tags_chooser_window ("Label note", tags = existed_lbls, selected_tags = labels,
+                                             location = root_location, relax_list_order = False)
+            if changed:
+                if new_labels:
+                    for l in new_labels:
+                        if l not in existed_lbls:
+                            existed_lbls [l] = 1
+                        else:
+                            if l not in lbls:
+                                existed_lbls [l] += 1
+
+                    labels = new_labels
+                else:
+                    labels = []
+            continue
 
         if event in (sg.WIN_CLOSED, 'ESC'):
             edit_note = None
             break
+
         if event == 'Save & Close':
-            edit_note = None
+            edit_note = Note (timestamp = int(time.time()), content = values ['-EDT-NOTE-'] if ctn_edited else '', tags = tags, labels = labels, links = links, color = color)
             break
 
     pop_nested_window (_win)
         
-    return edit_note
+    return note_delete, edit_note
 
 def make_theme_window (theme):
     sg.theme (theme)
@@ -860,7 +592,7 @@ def theme_change (cfg):
     setting_window['-LIST-'].update (scroll_to_index = selected_idx, set_to_index = selected_idx)
 
     while True:  # Event Loop
-        event, values  = setting_window.read()
+        event, values  = setting_window.read(100)
         if event == '-LIST-':
             selected_theme = values['-LIST-'][0]
             selected_idx   = setting_window['-LIST-'].get_indexes ()[0]
@@ -991,15 +723,14 @@ def handle (cb):
         return True
 
     if event == '-BTN-NOTE-':
-        note = cb['new_note']()
-        print (note)
-        if note is not None:
-            cardbox.notebook.add_note (note)
-            cardbox.sync_cards  (dirty_only = True)
-            cardbox.refresh_box ()
+        delete, note = cb['new_note']()
+        #print (note)
+        if not delete and (note is not None):
+            cardbox.notebook.add_note (note, set_dirty = True)
             update_show_tags    (cardbox.notebook.tags)
             update_show_labels  (cardbox.notebook.labels)
-
+            cardbox.sync_cards  (dirty_only = True)
+            cardbox.refresh_box ()
         return True
 
     if event == (cardbox.name, "graph"): # a mouse event on cardbox
@@ -1040,8 +771,18 @@ def handle (cb):
             else: # Click only on note
                 note = cardbox.find_note_at_fig (dest_fig)
                 if note:
-                    edited = cb['new_note'](note = note)
-                    print (edited)
+                    delete, edited = cb['new_note'](note = note)
+                    if delete:
+                        cardbox.update_note (cardbox.find_notes_from_fig (dest_fig), delete = True)
+                        update_show_tags    (cardbox.notebook.tags)
+                        update_show_labels  (cardbox.notebook.labels)
+                    else:
+                        if edited is not None:
+                            cardbox.notebook.update_note (note, edited, set_dirty = True) 
+                            cardbox.sync_cards  (dirty_only = True)
+                            cardbox.refresh_box ()
+                            update_show_tags    (cardbox.notebook.tags)
+                            update_show_labels  (cardbox.notebook.labels)
 
         # Reset all 
         dragging    = False

@@ -14,7 +14,7 @@ class Graph (sg.Graph):
         if self.selected_fig is None:
             fig   = self.get_figures_at_location ((event.x, event.y))
             #print (fig)
-            if len(fig) == 0:
+            if len(fig) > 0:
                 self.selected_fig = fig
 
         if self.selected_fig:
